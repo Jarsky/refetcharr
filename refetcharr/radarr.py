@@ -48,6 +48,23 @@ def grab(rel: dict, mid: int) -> None:
     call("POST", "/release", {"guid": rel["guid"], "indexerId": rel["indexerId"], "movieId": mid})
 
 
+def poster(mid: int) -> bytes:
+    """The film's poster, 250 px wide: Radarr's own cached copy (the API path; /MediaCover without /api/v3 is the web UI)."""
+    url, key = config.radarr_url().rstrip("/"), config.radarr_key()
+    if not key:
+        raise RadarrError("No Radarr API key")
+    req = urllib.request.Request(f"{url}/api/v3/MediaCover/{int(mid)}/poster-250.jpg", headers={"X-Api-Key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            if not (r.headers.get("Content-Type") or "").startswith("image/"):
+                raise RadarrError(f"Radarr has no poster for film {mid}")
+            return r.read()
+    except urllib.error.HTTPError as e:
+        raise RadarrError(f"Radarr said HTTP {e.code} for film {mid}'s poster") from None
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise RadarrError(f"Can't reach Radarr at {url}: {getattr(e, 'reason', e)}") from None
+
+
 def queue() -> list:
     return call("GET", "/queue?pageSize=1000&includeMovie=true")["records"]
 

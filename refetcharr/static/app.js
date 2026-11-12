@@ -218,7 +218,7 @@ function renderReplaced() {
   const rows = (doneShow === "issues" ? withIssues : replacedRows).filter((x) => !q || x.title.toLowerCase().includes(q)).slice(0, 400);
   $("done-rows").innerHTML = rows.map((x) => xrow("done-rows", x.id, `<td class="pick"><input type="checkbox" value="${x.id}" ${keep.has(String(x.id)) ? "checked" : ""} aria-label="Select ${esc(x.title)}"></td>
     <td>${esc(x.title)} <span class="yr">${x.year || ""}</span> ${x.issues.map(ISSUE_TAG).join(" ")}${x.again ? ' <span class="tag" style="--c: var(--cyan)">replaced again</span>' : ""}${x.problem ? `<div class="why">${esc(x.problem)}</div>` : ""}</td>
-    <td>${esc(x.when || "")}</td><td>${esc(x.old_quality || "")}</td><td>${qb(x.before_badge, "Before: not recorded (replaced before 1.5)")}<span class="arrow">→</span>${qb(x.after_badge)}</td>
+    <td>${esc(x.when || "")}</td><td>${esc(x.old_quality || "")}</td><td>${x.before?.rating != null ? rp(x.before) : qb(x.before_badge, "The original file wasn't rated when it was replaced, and it's gone now")}<span class="arrow">→</span>${x.after?.rating != null ? rp(x.after) : qb(x.after_badge)}</td>
     <td class="r">${size(x.old_size)}</td><td class="r">${size(x.old_size - x.freed)}</td>
     <td class="r">${x.freed < 0 ? `<span class="grew" title="A tiny file swapped for a bigger one">+${size(-x.freed)}</span>` : size(x.freed)}</td>`)).join("")
     || `<tr><td colspan="8" class="empty">${doneShow === "issues" ? "Nothing needs attention." : "Nothing replaced yet."}</td></tr>`;
@@ -252,24 +252,47 @@ $("lib-groups").addEventListener("click", (e) => {
 });
 const RANK = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 async function loadFilms() {
-  try { films = await api("GET", "/api/films"); films.forEach((f) => (f.badge_rank = RANK[f.badge] || 0)); renderFilms(); } catch (e) { toast(e.message, "err"); }
+  try {
+    films = await api("GET", "/api/films");
+    films.forEach((f) => { f.badge_rank = RANK[f.badge] || 0; f.rating_sort = f.rating ?? (f.badge_rank - 10); });
+    renderFilms();
+  } catch (e) { toast(e.message, "err"); }
 }
+const resKey = (r) => (r >= 2000 ? "2160" : r >= 1000 ? "1080" : r >= 700 ? "720" : "sd");
+const LIB_SEL = "#lib-rows input:checked, #lib-grid input:checked";
+const libPicked = () => [...document.querySelectorAll(LIB_SEL)];
 function shownFilms() {
   const q = $("lib-q").value.trim().toLowerCase(), untried = $("lib-untried").checked;
   const [k, dir] = libSort;
   const showIgnored = $("lib-ignored").checked;
-  return films.filter((f) => libGroups.has(f.group) && (!q || f.title.toLowerCase().includes(q)) && (!untried || !f.refetch) && (showIgnored || !f.ignored))
+  const fr = $("lib-f-rating").value, fres = $("lib-f-res").value, fhdr = $("lib-f-hdr").value, fat = $("lib-f-atmos").value;
+  return films.filter((f) => libGroups.has(f.group) && (!q || f.title.toLowerCase().includes(q)) && (!untried || !f.refetch) && (showIgnored || !f.ignored)
+      && (!fr || f.badge === fr) && (!fres || resKey(f.resolution) === fres)
+      && (!fhdr || (f.dynamic_range && f.dynamic_range !== "SDR" ? "1" : "0") === fhdr) && (!fat || (f.atmos ? "1" : "0") === fat))
     .sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * dir);
 }
+const savingCell = (f) => (f.group === "tiny" ? `<span class="grew" title="Needs a bigger file">+${(-f.saving_gb).toFixed(1)} GB</span>` : f.saving_gb > 0 ? `saves ${f.saving_gb.toFixed(1)} GB` : "");
+function filmCover(f) {
+  const [label, col] = GROUPS[f.group] || [f.group, "var(--line)"], canPick = !f.refetch;
+  return `<div class="cover ${f.ignored ? "ignored" : ""}" data-id="${f.id}">
+    ${canPick ? `<label class="cover-sel" title="Select"><input type="checkbox" value="${f.id}" data-ignored="${f.ignored ? 1 : ""}" aria-label="Select ${esc(f.title)}"></label>` : ""}
+    <button type="button" class="cover-img" data-open-film="${f.id}" aria-label="Details of ${esc(f.title)}">${poster(f)}</button>
+    <div class="cover-meta"><b class="cover-title">${esc(f.title)}</b> <span class="yr">${f.year || ""}</span>
+      <div class="cover-line">${rp(f)}<span>${f.size_gb.toFixed(1)} GB</span><span>${resLabel(f.resolution)}</span></div>
+      <div class="cover-line"><span class="tag" style="--c:${col}">${label}</span>${savingCell(f)}${f.refetch ? `<span class="tag">${esc(f.refetch)}</span>` : ""}</div></div>
+  </div>`;
+}
 function renderFilms() {
-  const v = shownFilms();
-  $("lib-rows").innerHTML = v.slice(0, libShown).map((f) => {
+  const v = shownFilms(), covers = viewOf("lib") === "covers";
+  $("lib-table").hidden = covers; $("lib-grid").hidden = !covers;
+  $("lib-grid").innerHTML = covers ? v.slice(0, libShown).map(filmCover).join("") || `<p class="empty">No films match.</p>` : "";
+  $("lib-rows").innerHTML = covers ? "" : v.slice(0, libShown).map((f) => {
     const [label, col] = GROUPS[f.group] || [f.group, "var(--line)"], canPick = !f.refetch;
     const link = `${(status?.radarr_link || "").replace(/\/$/, "")}/movie/${encodeURIComponent(f.slug)}`;
     return xrow("lib-rows", f.id, `<td class="pick">${canPick ? `<input type="checkbox" value="${f.id}" data-ignored="${f.ignored ? 1 : ""}" aria-label="Select ${esc(f.title)}">` : ""}</td>
       <td><a href="${esc(link)}" target="_blank" rel="noopener">${esc(f.title)}</a><span class="yr">${f.year || ""}</span>${f.release_group ? `<span class="rg">${esc(f.release_group)}</span>` : ""}</td>
       <td><span class="tag" style="--c:${col}">${label}</span></td><td>${esc(f.quality)} · ${esc(f.video_codec)}${f.dynamic_range && f.dynamic_range !== "SDR" ? " · " + esc(f.dynamic_range) : ""}${f.audio ? ` · ${esc(audioLabel(f.audio))} ${chans(f.channels)}${f.atmos ? " Atmos" : ""}` : ""}</td>
-      <td>${qb(f.badge, "Rated at the next rescan", f.video_tier ? `Picture ${f.video_tier.toLowerCase()} (${f.picture_mbps} Mbps in x265 terms), audio ${(f.audio_tier || "unknown").toLowerCase()}` : "")}</td>
+      <td>${rp(f)}</td>
       <td class="r">${f.size_gb.toFixed(1)} GB</td><td class="r">${f.mb_per_min}</td>
       <td class="r">${f.group === "tiny" ? `<span class="grew" title="Needs a bigger file">+${(-f.saving_gb).toFixed(1)} GB</span>` : f.saving_gb > 0 ? f.saving_gb.toFixed(1) + " GB" : "–"}</td>
       <td>${f.refetch ? `<span class="tag">${esc(f.refetch)}</span>` : ""}${f.ignored ? `<span class="tag" title="${esc(f.ignored)}">Ignored</span>` : ""}</td>`, f.ignored ? "ignored" : "");
@@ -281,7 +304,7 @@ function renderFilms() {
   updateLibQueue();
 }
 function updateLibQueue() {
-  const picked = [...document.querySelectorAll("#lib-rows input:checked")], n = picked.length, allIgnored = n && picked.every((i) => i.dataset.ignored);
+  const picked = libPicked(), n = picked.length, allIgnored = n && picked.every((i) => i.dataset.ignored);
   $("lib-queue").disabled = !n; $("lib-queue").textContent = n ? `Replace ${n} selected` : "Replace selected";
   $("lib-ignore").disabled = !n; $("lib-ignore").textContent = n ? `${allIgnored ? "Stop ignoring" : "Ignore"} ${n} selected` : "Ignore selected";
   $("lib-ignore").dataset.mode = allIgnored ? "off" : "on";
@@ -309,29 +332,40 @@ function estAfterGb(f, r) {   // what a replacement would likely weigh: the prof
   return Math.min(target, f.size_gb * r.max_ratio);
 }
 const gb = (x) => size(x * 1e9);
-function estLine(n, now, after, freed, added, basis, what = "selected") {
-  const net = now - after;
-  return `<b>${n} ${what}</b><span>now ${gb(now)}</span><span>→ about ${gb(after)}</span>
-    <span class="${net >= 0 ? "save" : "grew"}">${net >= 0 ? "saves" : "adds"} ~${gb(Math.abs(net))}</span>
-    ${freed > 0.05 && added > 0.05 ? `<span class="muted">frees ${gb(freed)}, adds ${gb(added)}</span>` : ""}<span class="muted small">${basis}</span>`;
+// a selection's summary as tiles (1.8.0): films, size now, about after, the net, freed and added apart, the ratings
+function estTiles(o) {
+  const net = o.now - o.after;
+  const t = (label, value, cls = "", sub = "") => `<div class="tile ${cls}"><span class="tile-v">${value}</span><span class="tile-l">${label}</span>${sub ? `<span class="tile-s">${sub}</span>` : ""}</div>`;
+  const avg = (xs) => (xs.length ? (xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(1) : null);
+  const rb = avg(o.ratingsBefore || []), ra = avg(o.ratingsAfter || []);
+  return `<div class="tiles">
+    ${t(o.what, o.n.toLocaleString())}
+    ${t("Size now", gb(o.now))}
+    ${t(o.real ? "Size after" : "Size after, about", gb(o.after))}
+    ${t(net >= 0 ? "Saves" : "Adds", gb(Math.abs(net)), net >= 0 ? "save" : "grew")}
+    ${o.freed > 0.05 && o.added > 0.05 ? t("Freed", gb(o.freed), "save", "by the films getting smaller") + t("Added", gb(o.added), "grew", "by the films getting bigger") : ""}
+    ${rb && ra ? t("Average rating", `${rb} → ${ra}`, +ra >= +rb ? "save" : "grew", "out of 5") : ""}
+  </div>`;
 }
 function renderLibEst() {
-  const box = $("lib-est"), ids = new Set([...document.querySelectorAll("#lib-rows input:checked")].map((i) => +i.value));
+  const box = $("lib-est"), ids = new Set(libPicked().map((i) => +i.value));
   if (!ids.size) { box.hidden = true; return; }
   if (!liveRules) { loadProfiles().then(() => { if (liveRules) renderLibEst(); }); loadSuggestions(true); return; }
   const r = rulesFor(estWith), sel = films.filter((f) => ids.has(f.id));
   let now = 0, after = 0, freed = 0, added = 0, real = 0;
+  const ratingsBefore = [], ratingsAfter = [];
   for (const f of sel) {
     const sg = estWith === "current" ? sugg.find((s) => s.id === f.id && s.options.length) : null, pick = sg && pickOf(sg);
     const a = pick ? pick.size / 1e9 : estAfterGb(f, r);
-    if (pick) real++;
+    if (pick) { real++; if (f.rating != null && pick.rating != null) { ratingsBefore.push(f.rating); ratingsAfter.push(pick.rating); } }
     now += f.size_gb; after += a;
     if (a < f.size_gb) freed += f.size_gb - a; else added += a - f.size_gb;
   }
-  const basis = real === sel.length ? "from the releases found" : real ? `${real} from releases found, ${sel.length - real} from the target size` : "estimated from the target size";
+  const basis = real === sel.length ? "Sizes after are the releases found." : real ? `${real} from releases found under Suggestions, ${sel.length - real} estimated from the target size.` : "Estimated from the target size: find replacements for real release sizes.";
   const opts = [["current", `Your settings (${profileLabel(profiles.current)})`], ...profiles.profiles.filter((p) => p.id !== profiles.current).map((p) => [p.id, p.label])];
-  box.innerHTML = estLine(sel.length, now, after, freed, added, basis)
-    + `<label class="est-with">Estimate with <select id="est-with">${opts.map(([v, l]) => `<option value="${v}" ${v === estWith ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+  box.innerHTML = estTiles({ what: sel.length === 1 ? "Film selected" : "Films selected", n: sel.length, now, after, freed, added, real: real === sel.length, ratingsBefore, ratingsAfter })
+    + `<div class="est-foot"><span class="muted small">${basis}</span>
+      <label class="est-with">Estimate with <select id="est-with">${opts.map(([v, l]) => `<option value="${v}" ${v === estWith ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label></div>`;
   box.hidden = false;
 }
 $("lib-est").addEventListener("change", (e) => { if (e.target.id === "est-with") { estWith = e.target.value; renderLibEst(); } });
@@ -349,21 +383,24 @@ $("profiles").addEventListener("click", (e) => {
   act(async () => { const r = await api("POST", "/api/profile", { id: b.dataset.profile }); estWith = "current"; await loadRules(); return r; });
 });
 $("lib-rows").addEventListener("change", updateLibQueue);
-$("lib-all").addEventListener("change", (e) => { document.querySelectorAll("#lib-rows input").forEach((i) => (i.checked = e.target.checked)); updateLibQueue(); });
+$("lib-grid").addEventListener("change", updateLibQueue);
+$("lib-grid").addEventListener("click", (e) => { const b = e.target.closest("[data-open-film]"); if (b) openFilm(+b.dataset.openFilm); });
+$("lib-all").addEventListener("change", (e) => { document.querySelectorAll("#lib-rows input, #lib-grid input").forEach((i) => (i.checked = e.target.checked)); updateLibQueue(); });
 $("lib-q").addEventListener("input", () => { libShown = 200; renderFilms(); });
 $("lib-untried").addEventListener("change", renderFilms);
 $("lib-ignored").addEventListener("change", () => { libShown = 200; renderFilms(); });
+for (const id of ["lib-f-rating", "lib-f-res", "lib-f-hdr", "lib-f-atmos"]) $(id).addEventListener("change", () => { libShown = 200; renderFilms(); });
 $("lib-ignore").addEventListener("click", () => act(async () => {
-  const ids = [...document.querySelectorAll("#lib-rows input:checked")].map((i) => +i.value);
+  const ids = libPicked().map((i) => +i.value);
   const r = await api("POST", "/api/ignore", { ids, ignore: $("lib-ignore").dataset.mode !== "off" }); await loadFilms(); return r;
 }));
-$("lib-suggest").addEventListener("click", () => act(() => api("POST", "/api/suggest", { ids: [...document.querySelectorAll("#lib-rows input:checked")].map((i) => +i.value) })));
+$("lib-suggest").addEventListener("click", () => act(() => api("POST", "/api/suggest", { ids: libPicked().map((i) => +i.value) })));
 $("lib-more").addEventListener("click", () => { libShown += 200; renderFilms(); });
 document.querySelectorAll("#tab-library th[data-sort]").forEach((th) => th.addEventListener("click", () => {
   const k = th.dataset.sort; libSort = [k, libSort[0] === k ? -libSort[1] : (k === "title" || k === "group" || k === "quality" ? 1 : -1)]; renderFilms();
 }));
 $("lib-queue").addEventListener("click", () => act(async () => {
-  const ids = [...document.querySelectorAll("#lib-rows input:checked")].map((i) => +i.value);
+  const ids = libPicked().map((i) => +i.value);
   const r = await api("POST", "/api/queue", { ids }); await loadFilms(); return r;
 }));
 
@@ -637,6 +674,74 @@ const chans = (c) => (c ? (+c).toFixed(1) : "");
 function qb(badge, missing = "", title = "") {
   return badge ? `<span class="qb ${badge}" title="${esc(title || badge)}">${badge}</span>` : `<span class="qb none" title="${esc(missing || "Not rated")}">–</span>`;
 }
+
+// ── 1.8.0: ratings out of 5, the score card, covers ───────────────────────
+const r1 = (v) => (v == null ? "?" : (+v).toFixed(1));
+const tierOf = (v) => (v == null ? "" : v >= 3.5 ? "HIGH" : v >= 2 ? "MEDIUM" : "LOW");
+// a rating pill: the overall rating out of 5, coloured by its tier (older records without one show the tier word)
+function rp(x, missing = "Rated at the next rescan, or search again") {
+  if (!x || x.rating == null) return qb(x?.badge || x?.video_tier, missing);
+  const t = x.badge || tierOf(x.rating);
+  return `<span class="qb rp ${t}" title="${esc(`${t}: ${r1(x.rating)} of 5 · picture ${r1(x.video_rating)}, audio ${r1(x.audio_rating)}`)}">${r1(x.rating)}</span>`;
+}
+// the score card: resolution, the overall rating and its tier, then picture and audio with what HIGH needs
+function ratingCard(x, label = "") {
+  if (!x || x.rating == null) return "";
+  const bar = (name, v, line) => `<div class="rbar"><span class="rbar-name">${name}</span>
+    <span class="rbar-track"><i class="${tierOf(v)}" style="width:${Math.max(0, Math.min(5, v || 0)) * 20}%"></i></span><b class="${tierOf(v)}">${r1(v)}</b>
+    <small class="rbar-line">${line}</small></div>`;
+  const vb = x.video_bounds || [], ab = x.audio_bounds || [];
+  const pic = x.picture_mbps ? `${x.picture_mbps} Mbps picture${x.estimated ? " (from size)" : ""} · HIGH from ${vb[1] ?? "?"} Mbps` : "picture bitrate unknown";
+  const aud = [audioLabel(x.audio), chans(x.channels)].filter(Boolean).join(" ") || "audio";
+  const snd = x.audio_rating == null ? "not named in the title, so not rated" : x.lossless ? `${aud} · lossless (always 5.0)` : x.audio_kbps ? `${aud} · ${x.audio_kbps} kbps · HIGH from ${ab[1] ?? "?"} kbps` : "audio bitrate unknown";
+  return `<div class="rcard">${label ? `<div class="rcard-label">${label}</div>` : ""}
+    <div class="rcard-top"><span class="rres">${resLabel(x.resolution) || "?"}</span><span class="rsep"></span>
+      <span class="rnum ${x.badge}">${r1(x.rating)}</span><span class="rof">/ 5<span class="rtier ${x.badge}">${x.badge}</span></span></div>
+    ${bar("Picture", x.video_rating, pic)}${bar("Audio", x.audio_rating, snd)}</div>`;
+}
+function miniCard(x) {
+  if (!x || x.rating == null) return `<div class="rmini">${qb(x?.badge || x?.video_tier, "Not rated")}</div>`;
+  const bar = (name, v, why) => `<span class="rmini-name">${name}</span><span class="rbar-track"><i class="${tierOf(v)}" style="width:${Math.max(0, Math.min(5, v || 0)) * 20}%"></i></span>`
+    + `<b class="${tierOf(v)}" title="${esc(why)}">${v == null ? "–" : r1(v)}</b>`;
+  return `<div class="rmini" title="${esc(`${x.badge}: ${r1(x.rating)} of 5`)}">
+    <div class="rmini-top"><span class="rnum ${x.badge}">${r1(x.rating)}</span><span class="rof">/ 5<span class="rtier ${x.badge}">${x.badge}</span></span></div>
+    <div class="rmini-bars">${bar("Picture", x.video_rating, x.picture_mbps ? `${x.picture_mbps} Mbps picture` : "picture")}${bar("Audio", x.audio_rating, x.audio_rating == null ? "Not named in the title, so not rated" : "audio")}</div></div>`;
+}
+const poster = (f) => `<img loading="lazy" decoding="async" src="/api/poster/${f.id}" alt=""><span class="cover-fallback">${esc(f.title)}</span>`;
+document.addEventListener("error", (e) => { if (e.target.matches?.(".cover-img img")) e.target.parentNode.classList.add("noimg"); }, true);
+const VIEW_KEY = "refetcharr-view-";
+const viewOf = (page) => { try { return localStorage.getItem(VIEW_KEY + page) || "list"; } catch { return "list"; } };
+function setView(page, v) {
+  try { localStorage.setItem(VIEW_KEY + page, v); } catch { /* private window */ }
+  document.querySelectorAll(`[data-view-for="${page}"] [data-view]`).forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === v));
+  document.querySelectorAll(`[data-covers-only="${page}"]`).forEach((el) => (el.hidden = v !== "covers"));
+  page === "lib" ? renderFilms() : renderSuggestions();
+}
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-view-for] [data-view]"); if (b) setView(b.closest("[data-view-for]").dataset.viewFor, b.dataset.view); });
+for (const page of ["lib", "sg"]) {
+  document.querySelectorAll(`[data-view-for="${page}"] [data-view]`).forEach((b) => b.setAttribute("aria-pressed", b.dataset.view === viewOf(page)));
+  document.querySelectorAll(`[data-covers-only="${page}"]`).forEach((el) => (el.hidden = viewOf(page) !== "covers"));
+}
+// a film's details in a dialog (the cover views have no row to open underneath)
+let dlgSugg = null;
+function openDialog(html) { $("film-dlg-body").innerHTML = html; if (!$("film-dlg").open) $("film-dlg").showModal(); }
+async function openFilm(id) {
+  dlgSugg = null; openDialog(LOADING);
+  try { openDialog(renderDetail(await api("GET", `/api/films/${id}`))); } catch (e) { openDialog(`<div class="dd"><p class="problem">${esc(e.message)}</p></div>`); }
+}
+function openSugg(id) { const sg = sugg.find((s) => s.id === id); if (sg) { dlgSugg = id; openDialog(suggDetail(sg)); } }
+$("film-dlg").addEventListener("click", (e) => {
+  if (e.target === $("film-dlg") || e.target.closest("[data-close]")) { $("film-dlg").close(); return; }
+  const c = e.target.closest("[data-choose]");
+  if (c && !e.target.closest("a, button")) { choosePick(+c.dataset.choose, c.dataset.guid); return; }
+  const p = e.target.closest("[data-pick]");
+  if (p) { p.disabled = true; act(async () => { const r = await api("POST", "/api/pick", { id: +p.dataset.pick, guid: p.dataset.guid }); $("film-dlg").close(); setTimeout(() => loadSuggestions(), 4000); return r; }); }
+});
+$("film-dlg").addEventListener("keydown", (e) => {
+  const c = e.target.closest("[data-choose]");
+  if (c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); choosePick(+c.dataset.choose, c.dataset.guid); }
+});
+$("film-dlg").addEventListener("close", () => { dlgSugg = null; });
 // a table row that opens its film's details underneath when clicked
 function xrow(box, id, cells, cls = "") {
   const open = expanded.has(`${box}:${id}`), cols = $(box)?.dataset.cols || 6;
@@ -668,7 +773,8 @@ for (const box of ["lib-rows", "fail-rows", "done-rows", "active"]) {
 }
 
 const DETAIL_ROWS = [
-  ["Rating", (x) => (x.badge || x.video_tier ? `${qb(x.badge)} <span class="muted small">${x.video_tier ? `picture ${x.video_tier.toLowerCase()}` : ""}${x.audio_tier ? ` · audio ${x.audio_tier.toLowerCase()}` : ""}</span>` : "")],
+  ["Rating", (x) => (x.rating != null ? `${rp(x)} <span class="muted small">of 5 · picture ${r1(x.video_rating)} · audio ${r1(x.audio_rating)}</span>`
+    : x.badge || x.video_tier ? `${qb(x.badge)} <span class="muted small">${x.video_tier ? `picture ${x.video_tier.toLowerCase()}` : ""}${x.audio_tier ? ` · audio ${x.audio_tier.toLowerCase()}` : ""}</span>` : "")],
   ["Quality", (x) => esc(x.quality || "")],
   ["Size", (x) => (x.size ? `${size(x.size)}${x.mb_per_min ? ` · ${x.mb_per_min} MB/min` : ""}` : "")],
   ["Video", (x) => esc([x.video_codec, x.bit_depth ? `${x.bit_depth}-bit` : ""].filter(Boolean).join(" · "))],
@@ -681,6 +787,15 @@ const DETAIL_ROWS = [
   ["Release", (x) => ((x.title || x.name) ? `<span class="name">${esc(x.title || x.name)}</span>` : "") + (x.release_group ? ` <span class="rg">${esc(x.release_group)}</span>` : "")],
   ["Seeders · score", (x) => (x.seeders != null ? `${x.seeders} seeders · format score ${x.score ?? 0}${x.indexer ? ` · ${esc(x.indexer)}` : ""}` : "")],
 ];
+// score cards over the comparison: records from before 1.8 have no ratings, so the file on disk is rated live instead
+function cardsFor(cols, d, done) {
+  const cards = cols.map(([h, x], i) => {
+    const live = (i === 0 && !done) || h === "Now on disk";
+    const src = x?.rating != null ? x : live && d.now?.rating != null ? d.now : null;
+    return src ? ratingCard(src, h.replace(/<[^>]*>/g, "").replace(/\(from its title\)/, "").trim()) : "";
+  }).filter(Boolean);
+  return cards.length ? `<div class="rcards ${cards.length > 1 ? "vs" : ""}">${cards.join('<span class="rarrow" aria-hidden="true">→</span>')}</div>` : "";
+}
 function renderDetail(d) {
   const st = d.state || {}, dec = st.decision || {}, legacy = st.status && !st.decision;
   const link = d.slug ? `${(status?.radarr_link || "").replace(/\/$/, "")}/movie/${encodeURIComponent(d.slug)}` : "";
@@ -709,6 +824,7 @@ function renderDetail(d) {
       ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open in Radarr ↗</a>` : ""}</div>
     ${dec.flagged || d.flagged_now ? `<p class="dd-flag"><b>Flagged</b>${esc(dec.flagged || d.flagged_now)}</p>` : ""}
     ${st.problem ? `<p class="problem">${esc(st.problem)}</p>` : ""}
+    ${cardsFor(cols, d, done)}
     <div class="cmpbox"><table class="cmp"><thead><tr><th></th>${cols.map(([h]) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
     ${need.length ? `<p class="note">A replacement must keep: <b>${need.join(", ")}</b> (checked on the title, then on the downloaded file).</p>` : ""}
     ${dec.why || rej.length ? `<div class="dd-cols">
@@ -835,13 +951,12 @@ async function loadSuggestions(quiet) {
   try { sugg = await api("GET", "/api/suggestions"); renderSuggestions(); } catch (e) { if (!quiet) toast(e.message, "err"); }
 }
 const resLabel = (r) => (r >= 2000 ? "4K" : r ? `${r}p` : "");
-const fileLine = (x) => `${qb(x.badge || x.video_tier)} ${size(x.size)}${x.resolution ? ` · ${resLabel(x.resolution)}` : ""}`;
+const fileLine = (x) => `${rp(x)} ${size(x.size)}${x.resolution ? ` · ${resLabel(x.resolution)}` : ""}`;
 const short = (x) => [x.video_codec, x.hdr || "SDR", [audioLabel(x.audio), chans(x.channels)].filter(Boolean).join(" ") + (x.atmos ? " Atmos" : "")]
   .filter(Boolean).map(esc).join(" · ");
 const saveText = (n) => (n >= 0 ? `saves ${size(n)}` : `<span class="grew">+${size(-n)}</span>`);
 function facts(x) {
-  return [qb(x.video_tier, "", `Picture ${x.picture_mbps} Mbps in x265 terms`),
-    `<span class="fact"><b>${size(x.size)}</b> ${x.mb_per_min ? `${x.mb_per_min} MB/min` : ""}</span>`,
+  return [`<span class="fact"><b>${size(x.size)}</b> ${x.mb_per_min ? `${x.mb_per_min} MB/min` : ""}</span>`,
     x.picture_mbps ? `<span class="fact">${x.picture_mbps} Mbps picture</span>` : "",
     `<span class="fact">${esc([resLabel(x.resolution), x.video_codec].filter(Boolean).join(" "))}</span>`,
     `<span class="fact ${x.hdr ? "hdr" : ""}">${esc(x.hdr || "SDR")}</span>`,
@@ -857,7 +972,7 @@ function optionCard(sg, o, i) {
       <div class="opt-meta">${esc([o.indexer, o.release_group, o.score ? `format score ${o.score}` : ""].filter(Boolean).join(" · "))}</div>
       <div class="facts">${facts(o)}</div>
     </div>
-    <div class="opt-side"><span class="opt-save">${saveText(o.saving)}</span></div>
+    <div class="opt-side">${miniCard(o)}<span class="opt-save">${saveText(o.saving)}</span></div>
   </div>`;
 }
 function choosePick(id, guid) {
@@ -867,24 +982,71 @@ function choosePick(id, guid) {
   api("POST", "/api/suggestions/choose", { id, guid }).catch((e) => { sg.chosen = was; renderSuggestions(); toast(e.message, "err"); });
 }
 function suggDetail(sg) {
-  const rej = sg.rejected || [];
+  const rej = sg.rejected || [], pick = sg.options.length ? pickOf(sg) : null;
+  const cards = [ratingCard(sg.before, "Now on disk"), pick ? ratingCard(pick, pick === sg.options[0] ? "Best pick" : "Your pick") : ""].filter(Boolean);
   return `<div class="dd">
     <div class="dd-head"><b>${esc(sg.title)} <span class="yr">${sg.year || ""}</span></b><span class="muted small">searched ${esc(sg.at)} · ${sg.releases} releases, ${sg.options.length} qualify</span></div>
     ${sg.flagged ? `<p class="dd-flag"><b>${sg.mode === "upgrade" ? "Putting right" : "Flagged"}</b>${esc(sg.flagged)}</p>` : ""}
+    ${cards.length ? `<div class="rcards ${cards.length > 1 ? "vs" : ""}">${cards.join('<span class="rarrow" aria-hidden="true">→</span>')}</div>`
+      : ""}
     <div class="opt now"><div class="opt-main"><div class="opt-title"><span class="pill-now">Now on disk</span><span class="name">${esc(sg.before.name || sg.before.quality || "")}</span></div>
-      <div class="facts">${facts(sg.before)}</div></div></div>
+      <div class="facts">${facts(sg.before)}</div></div><div class="opt-side">${miniCard(sg.before)}<span class="opt-save muted">${size(sg.before.size)}</span></div></div>
     ${sg.options.length ? `<div class="opts" role="radiogroup" aria-label="Releases for ${esc(sg.title)}">${sg.options.map((o, i) => optionCard(sg, o, i)).join("")}</div>
       <div class="opt-grab"><span class="muted small">Click a release to pick it: the pick is remembered for Grab picks.</span>
-        <button type="button" class="btn primary sm" data-pick="${sg.id}" data-guid="${esc(pickOf(sg).guid)}">Grab ${pickOf(sg) === sg.options[0] ? "the best pick" : "your pick"} · ${size(pickOf(sg).size)}</button></div>`
+        <button type="button" class="btn primary sm" data-pick="${sg.id}" data-guid="${esc(pick.guid)}">Grab ${pick === sg.options[0] ? "the best pick" : "your pick"} · ${size(pick.size)}</button></div>`
       : `<p class="problem">Nothing qualified of ${sg.releases} releases. The reasons are below.</p>`}
     <div class="dd-cols">
       ${sg.why?.length ? `<div><h4>Why the best pick</h4><ul>${sg.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
       ${rej.length ? `<div><details ${sg.options.length ? "" : "open"}><summary class="muted small">${rej.length} turned down</summary><ul class="rej">${rej.map((n) => { const m = /^(.*?): (.*)$/.exec(n); return `<li>${m ? `<b>${esc(m[1])}</b>: ${esc(m[2])}` : esc(n)}</li>`; }).join("")}</ul></details></div>` : ""}
     </div></div>`;
 }
+// what the list shows (1.8.0): find a title, filter, sort
+const SG_SORT = {
+  at: (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0),
+  saving: (a, b) => (pickSave(b) ?? -Infinity) - (pickSave(a) ?? -Infinity),
+  grow: (a, b) => (pickSave(a) ?? Infinity) - (pickSave(b) ?? Infinity),
+  now: (a, b) => (b.before.size || 0) - (a.before.size || 0),
+  pick: (a, b) => (pickSize(b) ?? -1) - (pickSize(a) ?? -1),
+  rating: (a, b) => (pickRating(b) ?? -1) - (pickRating(a) ?? -1),
+  gain: (a, b) => (ratingGain(b) ?? -9) - (ratingGain(a) ?? -9),
+  title: (a, b) => a.title.localeCompare(b.title),
+};
+const pickSave = (s) => (s.options.length ? pickOf(s).saving : null);
+const pickSize = (s) => (s.options.length ? pickOf(s).size : null);
+const pickRating = (s) => (s.options.length ? pickOf(s).rating ?? null : null);
+const ratingGain = (s) => (pickRating(s) != null && s.before.rating != null ? pickRating(s) - s.before.rating : null);
+function shownSugg() {
+  const q = $("sg-q").value.trim().toLowerCase(), show = $("sg-f-show").value, fr = $("sg-f-rating").value, fres = $("sg-f-res").value;
+  return sugg.filter((s) => {
+    const p = s.options.length ? pickOf(s) : null;
+    if (q && !s.title.toLowerCase().includes(q)) return false;
+    if (show === "options" && !p) return false;
+    if (show === "none" && p) return false;
+    if (show === "mine" && !(p && p !== s.options[0])) return false;
+    if (show === "shrink" && !(p && p.saving >= 0)) return false;
+    if (show === "grow" && !(p && p.saving < 0)) return false;
+    if (fr && !(p && (p.badge || p.video_tier) === fr)) return false;
+    if (fres && !(p && resKey(p.resolution) === fres)) return false;
+    return true;
+  }).sort(SG_SORT[$("sg-sort").value] || SG_SORT.at);
+}
+const SG_SEL = "#sg-rows input:checked, #sg-grid input:checked";
+const pickedSg = () => [...document.querySelectorAll(SG_SEL)].map((i) => +i.value);
+function suggCover(sg, keep) {
+  const p = sg.options.length ? pickOf(sg) : null;
+  return `<div class="cover" data-id="${sg.id}">
+    <label class="cover-sel" title="Select"><input type="checkbox" value="${sg.id}" ${keep.has(String(sg.id)) ? "checked" : ""} aria-label="Select ${esc(sg.title)}"></label>
+    <button type="button" class="cover-img" data-open-sugg="${sg.id}" aria-label="Releases for ${esc(sg.title)}">${poster(sg)}</button>
+    <div class="cover-meta"><b class="cover-title">${esc(sg.title)}</b> <span class="yr">${sg.year || ""}</span>
+      <div class="cover-line">${rp(sg.before)}<span>${size(sg.before.size)}</span>${p ? `<span class="arrow">→</span>${rp(p)}<span>${size(p.size)}</span>` : ""}</div>
+      <div class="cover-line">${p ? `${saveText(p.saving)}${p !== sg.options[0] ? '<span class="tag" style="--c: var(--violet)">your pick</span>' : ""}` : '<span class="muted">nothing qualified</span>'}</div></div>
+  </div>`;
+}
 function renderSuggestions() {
-  const keep = new Set([...document.querySelectorAll("#sg-rows input:checked")].map((i) => i.value));
-  $("sg-rows").innerHTML = sugg.map((sg) => {
+  const keep = new Set(pickedSg().map(String)), v = shownSugg(), covers = viewOf("sg") === "covers";
+  $("sg-table").hidden = covers; $("sg-grid").hidden = !covers;
+  $("sg-grid").innerHTML = covers ? v.map((sg) => suggCover(sg, keep)).join("") || `<p class="empty">No suggestions match.</p>` : "";
+  $("sg-rows").innerHTML = covers ? "" : v.map((sg) => {
     const best = sg.options.length ? pickOf(sg) : null, open = expanded.has(`sg-rows:${sg.id}`);
     const mine = best && best !== sg.options[0] ? ' <span class="tag" style="--c: var(--violet)">your pick</span>' : "";
     return `<tr class="row-x ${open ? "open" : ""}" data-id="${sg.id}"><td class="pick"><input type="checkbox" value="${sg.id}" ${keep.has(String(sg.id)) ? "checked" : ""} aria-label="Select ${esc(sg.title)}"></td>
@@ -894,27 +1056,38 @@ function renderSuggestions() {
       <td class="r nowrap">${best ? saveText(best.saving) : "–"}</td>
       <td class="r">${sg.options.length}</td><td class="muted small nowrap">${esc(sg.at)}</td></tr>`
       + (open ? `<tr class="detail" data-for="${sg.id}"><td colspan="7">${suggDetail(sg)}</td></tr>` : "");
-  }).join("") || `<tr><td colspan="7" class="empty">No suggestions yet. Pick films in Flagged films (or Replaced) and press Find replacements.</td></tr>`;
+  }).join("") || `<tr><td colspan="7" class="empty">${sugg.length ? "No suggestions match." : "No suggestions yet. Pick films in Flagged films (or Replaced) and press Find replacements."}</td></tr>`;
+  $("sg-count").textContent = sugg.length ? `${v.length.toLocaleString()} of ${sugg.length.toLocaleString()} films` : "";
   $("sg-busy").textContent = status?.suggesting ? `${status.suggesting} still to search…` : "";
+  if (dlgSugg != null && $("film-dlg").open) { const sg = sugg.find((s) => s.id === dlgSugg); if (sg) $("film-dlg-body").innerHTML = suggDetail(sg); }
   updateSgSel();
 }
 function updateSgSel() {
-  const picked = [...document.querySelectorAll("#sg-rows input:checked")].map((i) => +i.value), n = picked.length;
-  const grabbable = sugg.filter((s) => picked.includes(s.id) && s.options.length).length;
-  $("sg-again").disabled = $("sg-clear").disabled = !n;
-  $("sg-grab").disabled = !grabbable; $("sg-grab").textContent = grabbable ? `Grab ${grabbable} pick${grabbable === 1 ? "" : "s"}` : "Grab picks";
+  const picked = pickedSg(), n = picked.length;
   const sel = sugg.filter((s) => picked.includes(s.id) && s.options.length);
+  $("sg-again").disabled = $("sg-clear").disabled = !n;
+  $("sg-grab").disabled = !sel.length; $("sg-grab").textContent = sel.length ? `Grab ${sel.length} pick${sel.length === 1 ? "" : "s"}` : "Grab picks";
   let now = 0, after = 0, freed = 0, added = 0;
+  const ratingsBefore = [], ratingsAfter = [];
   for (const s of sel) {
-    const b = (s.before.size || 0) / 1e9, a = pickOf(s).size / 1e9;
+    const p = pickOf(s), b = (s.before.size || 0) / 1e9, a = p.size / 1e9;
     now += b; after += a;
     if (a < b) freed += b - a; else added += a - b;
+    if (s.before.rating != null && p.rating != null) { ratingsBefore.push(s.before.rating); ratingsAfter.push(p.rating); }
   }
   $("sg-est").hidden = !sel.length;
-  if (sel.length) $("sg-est").innerHTML = estLine(sel.length, now, after, freed, added, "from each film's pick", sel.length === 1 ? "film with a pick" : "films with a pick");
+  if (sel.length) {
+    $("sg-est").innerHTML = estTiles({ what: sel.length === 1 ? "Film with a pick" : "Films with a pick", n: sel.length, now, after, freed, added, real: true, ratingsBefore, ratingsAfter })
+      + (n > sel.length ? `<div class="est-foot"><span class="muted small">${n - sel.length} selected with nothing to grab aren't counted.</span></div>` : "");
+  }
 }
-$("sg-rows").addEventListener("change", updateSgSel);
-$("sg-all").addEventListener("change", (e) => { document.querySelectorAll("#sg-rows input").forEach((i) => (i.checked = e.target.checked)); updateSgSel(); });
+for (const box of ["sg-rows", "sg-grid"]) $(box).addEventListener("change", updateSgSel);
+$("sg-all").addEventListener("change", (e) => { document.querySelectorAll("#sg-rows input, #sg-grid input").forEach((i) => (i.checked = e.target.checked)); updateSgSel(); });
+$("sg-all-c").addEventListener("change", (e) => { document.querySelectorAll("#sg-grid input").forEach((i) => (i.checked = e.target.checked)); updateSgSel(); });
+$("lib-all-c").addEventListener("change", (e) => { document.querySelectorAll("#lib-grid input").forEach((i) => (i.checked = e.target.checked)); updateLibQueue(); });
+$("sg-q").addEventListener("input", renderSuggestions);
+for (const id of ["sg-f-show", "sg-f-rating", "sg-f-res", "sg-sort"]) $(id).addEventListener("change", renderSuggestions);
+$("sg-grid").addEventListener("click", (e) => { const b = e.target.closest("[data-open-sugg]"); if (b) openSugg(+b.dataset.openSugg); });
 $("sg-rows").addEventListener("keydown", (e) => {
   const c = e.target.closest("[data-choose]");
   if (c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); choosePick(+c.dataset.choose, c.dataset.guid); }
@@ -928,7 +1101,6 @@ $("sg-rows").addEventListener("click", (e) => {
   const tr = e.target.closest("tr.row-x"); if (!tr) return;
   const key = `sg-rows:${tr.dataset.id}`; expanded.has(key) ? expanded.delete(key) : expanded.add(key); renderSuggestions();
 });
-const pickedSg = () => [...document.querySelectorAll("#sg-rows input:checked")].map((i) => +i.value);
 $("sg-again").addEventListener("click", () => act(() => api("POST", "/api/suggest", { ids: pickedSg() })));
 $("sg-grab").addEventListener("click", () => {
   $("sg-grab").disabled = true;

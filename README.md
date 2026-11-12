@@ -27,13 +27,17 @@ On one 4,900-film library it has freed **16 TB** so far.
 - **Keeps what matters**: HDR and Dolby Vision (with an HDR10 base), surround sound, Atmos, English audio, and optionally
   lossless audio. Each is checked on the release title before grabbing, then on the downloaded file before anything
   is replaced. A file that fails stays in your download client; the original stays.
-- **Quality ratings**: every file and release gets LOW / MEDIUM / HIGH, based on its picture bitrate for its resolution
-  (in x265 terms: the audio's share taken off, other codecs converted) and its audio.
+- **Ratings out of 5**: every file and release is rated for its picture (bitrate for its resolution, in x265 terms) and
+  its audio, weighted into one rating that also picks releases: LOW under 2.0, MEDIUM to 3.5, HIGH from 3.5. A score
+  card shows each part against what HIGH needs.
 - **Profiles**: Max savings, Balanced or Max quality set the sizes, keep rules and picture rating in one click; tune
   anything after and it's Custom.
 - **Suggestions**: search now for chosen films and see every release that qualifies, side by side. Click a release to
   pick it; picks are remembered, so you can go film by film and grab them all at once.
-- **Estimates**: tick films to see their size now, about how big they'd be after, and the saving, with any profile.
+- **Estimates**: tick films to see tiles for their size now, about how big they'd be after, the saving and the
+  average rating, with any profile.
+- **Covers or a list**, with filters (rating, resolution, HDR, Atmos; on Suggestions what's getting smaller or bigger,
+  your picks) and sorting by saving, size, rating or rating gained.
 - **Replace again**: films that came out LOW, or lost HDR or surround, are listed under *Needs attention* and can be put
   right with a better file.
 - **Explains every decision**: open any film to see why it was flagged, the file before, the release chosen and the

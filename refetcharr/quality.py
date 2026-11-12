@@ -94,7 +94,50 @@ def tier(value: float, bounds: list) -> int:
     return 0 if value < bounds[0] else 1 if value < bounds[1] else 2
 
 
+# Ratings out of 5.0 (1.8.0, user 2026-11-13): the thresholds above land on fixed marks, so a rating reads the same way
+# for every resolution and for audio: LOW is under 2.0, MEDIUM 2.0 to 3.5, HIGH 3.5 and up. Within HIGH a rating climbs
+# to 5.0 at HIGH_TOP times the HIGH threshold. Lossless audio is 5.0; lossy audio stops at LOSSY_TOP. The overall rating
+# weighs picture and audio by video_weight, and it's what picks a release (rules.best) and gives the badge.
+MEDIUM_MARK, HIGH_MARK, TOP = 2.0, 3.5, 5.0
+HIGH_TOP = 1.6
+LOSSY_TOP = 4.5
+
+
+def _floor1(x: float) -> float:
+    """Down to one decimal, so a value just under a threshold never shows as its mark (1.99 is 1.9, not 2.0)."""
+    return int(x * 10 + 1e-9) / 10
+
+
+def rate(value: float, bounds: list, top: float = TOP) -> float | None:
+    """A bitrate against its [top of LOW, top of MEDIUM] thresholds, out of 5.0 (None when unknown)."""
+    if not value or value <= 0:
+        return None
+    lo, hi = bounds
+    if value < lo:
+        x = MEDIUM_MARK * value / lo
+    elif value < hi:
+        x = MEDIUM_MARK + (HIGH_MARK - MEDIUM_MARK) * (value - lo) / (hi - lo)
+    else:
+        x = HIGH_MARK + (TOP - HIGH_MARK) * min(1.0, (value - hi) / (hi * (HIGH_TOP - 1)))
+    return _floor1(min(x, top))
+
+
+def tier_of(rating: float | None) -> str:
+    if rating is None:
+        return ""
+    return "HIGH" if rating >= HIGH_MARK else "MEDIUM" if rating >= MEDIUM_MARK else "LOW"
+
+
+def overall(video: float | None, audio: float | None, weight: float) -> float | None:
+    if video is None:
+        return None
+    if audio is None:
+        return video
+    return _floor1((video * weight + audio * (100 - weight)) / 100)
+
+
 def badge(video_tier: int | None, audio_tier: int | None, weight: float) -> str:
+    """The overall badge from tiers alone (kept for callers without bitrates; describe_* use the ratings)."""
     if video_tier is None:
         return ""
     if audio_tier is None:
@@ -109,11 +152,25 @@ def _picture(total_mbps: float, audio: float, codec: str, q: dict) -> float:
     return round(video / q["codec_factor"].get(codec or "x264", 1.0), 2) if video else 0
 
 
-def _tiers(res: int, picture: float, audio_kbps_: float, lossless: bool, q: dict) -> dict:
-    vt = tier(picture, q["video"][res_key(res)]) if picture else None
-    at = 2 if lossless else (tier(audio_kbps_, q["audio"]) if audio_kbps_ else None)
-    return {"video_tier": TIERS[vt] if vt is not None else "", "audio_tier": TIERS[at] if at is not None else "",
-            "badge": badge(vt, at, q["video_weight"])}
+def _tiers(res: int, picture: float, audio_kbps_: float, lossless: bool, q: dict, audio_known: bool = True) -> dict:
+    """Ratings out of 5.0 for the picture, the audio and both (weighted), their tiers, and the thresholds they were
+    measured against (the UI shows "HIGH from ..."). Audio a release title doesn't name is unrated (its assumed size
+    still comes off the picture's share), so the overall rating is the picture's: a guess earns no credit."""
+    vb = q["video"][res_key(res)]
+    vr = rate(picture, vb)
+    ar = (TOP if lossless else rate(audio_kbps_, q["audio"], LOSSY_TOP)) if audio_known else None
+    r = overall(vr, ar, q["video_weight"])
+    return {"video_tier": tier_of(vr), "audio_tier": tier_of(ar), "badge": tier_of(r),
+            "video_rating": vr, "audio_rating": ar, "rating": r, "video_bounds": list(vb), "audio_bounds": list(q["audio"])}
+
+
+def rated(d: dict | None, q: dict | None = None) -> dict | None:
+    """A record kept from before 1.8 (a suggestion, a decision's file) with its ratings out of 5 filled in from the
+    bitrates it kept, so every file and release shows the same rating. Records that already have one are left alone."""
+    if not d or d.get("rating") is not None or not d.get("resolution") or not d.get("picture_mbps"):
+        return d
+    known = bool(d.get("audio") or d.get("lossless")) or not d.get("estimated")  # a file's audio is always known
+    return {**d, **_tiers(d["resolution"], d["picture_mbps"], d.get("audio_kbps") or 0, bool(d.get("lossless")), settings(q), audio_known=known)}
 
 
 def minutes_of(mi: dict, fallback: float = 0) -> float:
@@ -184,7 +241,7 @@ def describe_release(rel: dict, runtime_min: float, q: dict | None = None) -> di
            "seeders": rel.get("seeders"), "score": rel.get("customFormatScore"), "indexer": rel.get("indexer") or "",
            "release_group": rel.get("releaseGroup") or "", "languages": ", ".join(x.get("name", "") for x in rel.get("languages") or []),
            "estimated": True}
-    out.update(_tiers(res, picture, kbps, lossless, q))
+    out.update(_tiers(res, picture, kbps, lossless, q, audio_known=bool(acodec)))
     return out
 
 

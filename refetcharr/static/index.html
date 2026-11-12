@@ -117,21 +117,30 @@
         <button id="lib-ignore" class="btn" disabled>Ignore selected</button>
         <span id="lib-count" class="muted small"></span>
       </div>
+      <div class="filters">
+        <label>Rating <select id="lib-f-rating"><option value="">Any</option><option value="LOW">LOW · under 2.0</option><option value="MEDIUM">MEDIUM · 2.0 to 3.5</option><option value="HIGH">HIGH · 3.5 and up</option></select></label>
+        <label>Resolution <select id="lib-f-res"><option value="">Any</option><option value="2160">4K</option><option value="1080">1080p</option><option value="720">720p</option><option value="sd">SD</option></select></label>
+        <label>HDR <select id="lib-f-hdr"><option value="">Any</option><option value="1">HDR or DV</option><option value="0">SDR</option></select></label>
+        <label>Atmos <select id="lib-f-atmos"><option value="">Any</option><option value="1">Atmos</option><option value="0">No Atmos</option></select></label>
+        <label class="check" data-covers-only="lib" hidden><input id="lib-all-c" type="checkbox"> Select all shown</label>
+        <div class="seg view" data-view-for="lib" role="group" aria-label="View"><button type="button" data-view="list" aria-pressed="true">List</button><button type="button" data-view="covers" aria-pressed="false">Covers</button></div>
+      </div>
       <div id="lib-est" class="est" hidden aria-live="polite"></div>
       <p class="muted small hint">Click a film for its details: why it's flagged, its picture and audio, and what a replacement must keep.
         Find replacements searches now and lists every release that qualifies, to pick from under Suggestions.</p>
-      <div class="tablebox">
+      <div class="tablebox" id="lib-table">
         <table class="data">
           <thead><tr>
             <th class="pick"><input id="lib-all" type="checkbox" aria-label="Select all shown"></th>
             <th data-sort="title">Film</th><th data-sort="group">Group</th><th data-sort="quality">Quality</th>
-            <th data-sort="badge_rank" title="Picture and audio for its resolution (Settings → Quality)">Rating</th>
+            <th data-sort="rating_sort" title="Out of 5: picture and audio for its resolution, weighted (Settings → Quality). LOW under 2.0, MEDIUM to 3.5, HIGH from 3.5">Rating</th>
             <th data-sort="size_gb" class="r">Size</th><th data-sort="mb_per_min" class="r">MB/min</th>
             <th data-sort="saving_gb" class="r">Saves about</th><th>Refetcharr</th>
           </tr></thead>
           <tbody id="lib-rows" data-cols="9"></tbody>
         </table>
       </div>
+      <div id="lib-grid" class="covers" hidden></div>
       <button id="lib-more" class="btn ghost more" hidden>Show more</button>
     </div>
   </section>
@@ -167,13 +176,24 @@
         <button id="sg-again" class="btn" disabled>Search again</button>
         <button id="sg-clear" class="btn ghost" disabled>Clear selected</button>
       </div>
+      <div class="filters">
+        <input id="sg-q" type="search" placeholder="Find a title…" aria-label="Find a title">
+        <label>Show <select id="sg-f-show"><option value="">All</option><option value="options">With releases</option><option value="none">Nothing qualified</option><option value="mine">Your picks</option><option value="shrink">Getting smaller</option><option value="grow">Getting bigger</option></select></label>
+        <label>Pick rated <select id="sg-f-rating"><option value="">Any</option><option value="HIGH">HIGH</option><option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option></select></label>
+        <label>Resolution <select id="sg-f-res"><option value="">Any</option><option value="2160">4K</option><option value="1080">1080p</option><option value="720">720p</option></select></label>
+        <label>Sort <select id="sg-sort"><option value="at">Recently searched</option><option value="saving">Biggest saving</option><option value="grow">Biggest growth</option><option value="now">Biggest now</option><option value="pick">Biggest pick</option><option value="rating">Best pick rating</option><option value="gain">Biggest rating gain</option><option value="title">Title</option></select></label>
+        <label class="check" data-covers-only="sg" hidden><input id="sg-all-c" type="checkbox"> Select all shown</label>
+        <span id="sg-count" class="muted small"></span>
+        <div class="seg view" data-view-for="sg" role="group" aria-label="View"><button type="button" data-view="list" aria-pressed="true">List</button><button type="button" data-view="covers" aria-pressed="false">Covers</button></div>
+      </div>
       <div id="sg-est" class="est" hidden aria-live="polite"></div>
-      <div class="tablebox">
+      <div class="tablebox" id="sg-table">
         <table class="data">
           <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Film</th><th>Now</th><th>Pick</th><th class="r">Saves</th><th class="r">Options</th><th>Searched</th></tr></thead>
           <tbody id="sg-rows" data-cols="7"></tbody>
         </table>
       </div>
+      <div id="sg-grid" class="covers" hidden></div>
     </div>
   </section>
 
@@ -418,6 +438,7 @@
   </form>
 </dialog>
 <div id="toast" class="toast" role="status" hidden></div>
+<dialog id="film-dlg" class="film-dlg" aria-label="Film details"><button type="button" class="dlg-x" data-close aria-label="Close">✕</button><div id="film-dlg-body"></div></dialog>
 <script src="/static/app.js"></script>
 </body>
 </html>

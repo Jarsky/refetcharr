@@ -118,7 +118,7 @@ def group(m: dict, r: dict, q: dict | None = None, cur_file: dict | None = None)
         return "big1080"
     if is_x265(m) and ((res >= 2160 and mbm < r["tiny_2160"]) or (res == 1080 and mbm < r["tiny_1080"])):
         return "tiny"
-    if res >= 700 and (cur_file or current(m, q))["video_tier"] == "LOW":
+    if res >= 700 and (cur_file or current(m, q))["badge"] == "LOW":  # the overall rating (picture and audio weighted)
         return "lowq"
     return None
 
@@ -231,10 +231,16 @@ def judge(m: dict, rel: dict, r: dict, never: list | None = None, q: dict | None
 TIER_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "": -1}
 
 
+def is_high(d: dict) -> bool:
+    """Rated HIGH overall: 3.5 of 5 or more, picture and audio weighted (quality.overall)."""
+    return (d.get("rating") or 0) >= quality.HIGH_MARK
+
+
 def keeps(before: dict, after: dict, r: dict, upgrade: bool = False, need: dict | None = None) -> list[str]:
     """What a release would lose that the settings say to keep: HDR, surround sound, Atmos, lossless audio, and a
     picture good enough for its resolution (in x265 terms, with the audio's share taken off the size). An upgrade must
-    also be better than the current file: a higher picture rating, or HDR or surround sound won back."""
+    also be better than the current file: a higher overall rating (out of 5.0, picture and audio weighted), or HDR or
+    surround sound won back."""
     need = need or {}
     why = []
     if need.get("hdr") and not before.get("hdr") and not after.get("hdr"):
@@ -244,7 +250,11 @@ def keeps(before: dict, after: dict, r: dict, upgrade: bool = False, need: dict 
     if upgrade:
         won = (need.get("hdr") and after.get("hdr") and not before.get("hdr")) or \
               (need.get("surround") and after.get("channels", 0) >= 5 and before.get("channels", 0) < 5)
-        if not won and TIER_RANK[after.get("video_tier", "")] <= TIER_RANK[before.get("video_tier", "")]:
+        a, b = after.get("rating"), before.get("rating")
+        if a is not None and b is not None:
+            if not won and a <= b:
+                why.append(f"no better than the current file (rated {a:.1f} against {b:.1f} out of 5)")
+        elif not won and TIER_RANK[after.get("video_tier", "")] <= TIER_RANK[before.get("video_tier", "")]:  # rated before 1.8
             why.append(f"no better than the current file (picture {after.get('video_tier') or '?'} against "
                        f"{before.get('video_tier') or '?'}: {after.get('picture_mbps', 0):g} against {before.get('picture_mbps', 0):g} Mbps)")
     if r.get("keep_hdr", True) and before.get("hdr") and not after.get("hdr"):
@@ -280,15 +290,16 @@ def explain(m: dict, chosen: dict, ok: list, total: int, r: dict, q: dict | None
     sc = chosen.get("customFormatScore") or 0
     if any((x.get("customFormatScore") or 0) < sc for x in others):
         out.append(f"Radarr format score {sc}")
+    d = quality.describe_release(chosen, mins, q)
+    rated = (f"rated {d['rating']:.1f} of 5: picture {d['video_rating'] or 0:.1f}, audio {d['audio_rating'] or 0:.1f}"
+             if d["rating"] is not None else "not rated")
     if r.get("prefer") == "small":
-        d = quality.describe_release(chosen, mins, q)
-        out.append(f"the smallest release that qualifies ({chosen['size'] / 1e9:.1f} GB, picture {d['video_tier'] or '?'})")
+        out.append(f"the smallest release that qualifies ({chosen['size'] / 1e9:.1f} GB, {rated})")
     elif r.get("prefer", "high") == "high":
-        d = quality.describe_release(chosen, mins, q)
-        if d["video_tier"] == "HIGH":
-            out.append(f"the smallest release rated HIGH ({chosen['size'] / 1e9:.1f} GB, picture {d['picture_mbps']:g} Mbps in x265 terms)")
+        if is_high(d):
+            out.append(f"the smallest release rated HIGH, {quality.HIGH_MARK:g} or more ({chosen['size'] / 1e9:.1f} GB, {rated})")
         else:
-            out.append(f"none rated HIGH: the best picture below it ({d['video_tier'] or '?'}, {d['picture_mbps']:g} Mbps in x265 terms)")
+            out.append(f"none rated HIGH ({quality.HIGH_MARK:g} or more): the best rating below it ({rated})")
     else:
         pref = preferred(res(chosen), r)
         out.append(f"{chosen['size'] / 1e6 / mins:.0f} MB/min against a preferred {pref:g}")
@@ -300,9 +311,10 @@ def explain(m: dict, chosen: dict, ok: list, total: int, r: dict, q: dict | None
 def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | None = None,
          keep: list | None = None, mode: str = "", need: dict | None = None) -> tuple[dict | None, list[str]]:
     """The best qualifying release, and a note per release that didn't qualify. With prefer "high" (the default): the
-    highest resolution, then the best picture rating, then your preferred video codec, then the smallest HIGH release
-    (your audio codec preference only between HIGH releases within SIZE_BAND of each other, unless audio_before_size),
-    or, with none HIGH, your preferred audio then the best MEDIUM picture; then Radarr's format score and seeders. With prefer "size": resolution,
+    highest resolution, then whether it's rated HIGH overall (3.5 of 5 or more, picture and audio weighted), then your
+    preferred video codec, then the smallest HIGH release (your audio codec preference only between HIGH releases within
+    SIZE_BAND of each other, unless audio_before_size), or, with none HIGH, the best overall rating; then Radarr's
+    format score and seeders. With prefer "size": resolution,
     codecs, format score, the size nearest Preferred, seeders. `keep`, a list, receives the qualifying releases in rank
     order (for explain())."""
     mins = minutes(m) or 1
@@ -318,7 +330,7 @@ def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | 
     desc = {id(rel): quality.describe_release(rel, mins, q) for rel in ok}
     smallest: dict = {}  # resolution -> the smallest HIGH release's size
     for rel in ok:
-        if desc[id(rel)]["video_tier"] == "HIGH":
+        if is_high(desc[id(rel)]):
             res = rel["quality"]["quality"].get("resolution") or 0
             smallest[res] = min(smallest.get(res, rel["size"]), rel["size"])
 
@@ -327,15 +339,15 @@ def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | 
         codecs = (codec_rank(rel["title"], r["video_codecs"], "video"), codec_rank(rel["title"], r["audio_codecs"], "audio"))
         if r.get("prefer", "high") == "high":
             d = desc[id(rel)]
-            tier = TIER_RANK[d["video_tier"]]
-            top = (-res if r["prefer_higher_res"] else 0, -tier)
+            high = is_high(d)
+            top = (-res if r["prefer_higher_res"] else 0, 0 if high else 1)
             tail = (-(rel.get("customFormatScore") or 0), -(rel.get("seeders") or 0))
-            if tier == 2:  # HIGH: the smallest, your audio preference only between near-equal sizes
+            if high:  # HIGH: the smallest, your audio preference only between near-equal sizes
                 band = int((rel["size"] / (smallest.get(res) or rel["size"]) - 1) / SIZE_BAND)
                 size = round(rel["size"] / 1e9, 1)
                 order = (codecs[1], band, size) if r.get("audio_before_size") else (band, codecs[1], size)
                 return (*top, codecs[0], *order, *tail)
-            return (*top, *codecs, round(-d["picture_mbps"], 1), *tail)  # below HIGH: the best picture
+            return (*top, codecs[0], -(d["rating"] or 0), codecs[1], *tail)  # below HIGH: the best overall rating
         if r.get("prefer") == "small":  # Max savings: the smallest that qualifies, your audio order between equals
             return (-res if r["prefer_higher_res"] else 0, codecs[0], round(rel["size"] / 1e9, 1), codecs[1],
                     -(rel.get("customFormatScore") or 0), -(rel.get("seeders") or 0))

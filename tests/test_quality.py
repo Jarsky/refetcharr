@@ -338,3 +338,79 @@ def test_a_picked_option_is_remembered_grabbed_in_bulk_and_kept_by_a_new_search(
     e.suggest_one(7)  # search again: the same release is still offered, so your pick stays
     assert e.suggestions()[0]["chosen"] == b["guid"]
     assert "picked release for 1 film" in e.pick_best([7]) and list(e.jobs)[-1] == ("pick", 7, b["guid"])
+
+
+def test_ratings_out_of_5_land_on_the_tier_marks():
+    b = [3.5, 6.0]  # 1080p picture thresholds
+    assert quality.rate(3.49, b) == 1.9 and quality.rate(3.5, b) == 2.0  # never shown as its mark while below it
+    assert quality.rate(5.99, b) == 3.4 and quality.rate(6.0, b) == 3.5
+    assert quality.rate(6.0 * quality.HIGH_TOP, b) == 5.0 and quality.rate(50, b) == 5.0
+    assert quality.rate(0, b) is None and quality.tier_of(1.9) == "LOW" and quality.tier_of(2.0) == "MEDIUM" and quality.tier_of(3.5) == "HIGH"
+    assert quality.overall(4.0, 2.0, 70) == 3.4 and quality.overall(4.0, None, 70) == 4.0
+    d = quality.describe_release(release("Film 2000 2160p BluRay TrueHD 7 1 Atmos HDR x265-X", gb=30), 120, None)
+    assert d["audio_rating"] == 5.0 and d["lossless"]  # lossless audio is always 5.0
+    lossy = quality.describe_release(release("Film 2000 2160p WEB-DL DDP 5 1 HDR H 265-X", gb=30), 120, None)
+    assert lossy["audio_rating"] <= quality.LOSSY_TOP and lossy["badge"] == quality.tier_of(lossy["rating"])
+    assert d["video_bounds"] == [9.0, 15.0] and d["audio_bounds"] == [256, 640]
+
+
+def test_the_overall_rating_picks_so_weak_audio_counts_against_a_release():
+    m = film(gb=40, quality_name="Remux-1080p", res=1080, codec="AVC", hdr="", audio="AC3", ch=2.0)
+    stereo = release("Film 2000 1080p WEB-DL AAC 2 0 H 265-A", gb=5.99, res=1080)
+    surround = release("Film 2000 1080p WEB-DL DDP 5 1 H 265-B", gb=6.16, res=1080)
+    a, b = (quality.describe_release(x, 120, None) for x in (stereo, surround))
+    assert a["video_tier"] == "HIGH" and a["badge"] != "HIGH"  # a HIGH picture, but stereo AAC pulls it under 3.5
+    assert b["badge"] == "HIGH" and b["size"] > a["size"]
+    assert rules.best(m, [stereo, surround], R)[0] is surround
+    assert any("rated" in w and "of 5" in w for w in rules.explain(m, surround, [surround, stereo], 2, R))
+
+
+def test_low_quality_and_better_than_now_use_the_overall_rating():
+    m = film(gb=3.0, quality_name="WEBDL-1080p", res=1080, codec="x265", hdr="", audio="AC3", ch=5.1, kbps=448)
+    cur = rules.current(m, None)  # 2.9 Mbps picture (1.6) and DD 5.1 at 448 kbps (2.7): 1.9 overall
+    assert cur["video_tier"] == "LOW" and cur["badge"] == "LOW" and cur["rating"] < 2.0
+    assert rules.group(m, {**R, "tiny_1080": 1}, None) == "lowq"
+    unnamed = quality.describe_release(release("Film 2000 1080p WEB H264-X", gb=2.2, res=1080), 120, None)
+    assert unnamed["audio_rating"] is None and unnamed["rating"] == unnamed["video_rating"]  # a guessed track earns nothing
+    before = {"rating": 3.0, "video_tier": "MEDIUM"}
+    assert rules.keeps(before, {"rating": 2.9, "video_tier": "HIGH"}, R, upgrade=True)  # a higher picture tier isn't enough
+    assert not rules.keeps(before, {"rating": 3.2, "video_tier": "MEDIUM"}, R, upgrade=True)
+
+
+def test_posters_come_from_radarr_once_and_are_kept(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from refetcharr import auth, radarr, web
+    c = TestClient(web.app, headers={"X-Api-Key": auth.ensure_keys()["api_key"]})
+    calls = []
+    monkeypatch.setattr(radarr, "poster", lambda mid: calls.append(mid) or b"\xff\xd8poster")
+    r = c.get("/api/poster/7")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and r.content == b"\xff\xd8poster"
+    assert (tmp_path / "posters" / "7.jpg").exists()
+
+    def gone(mid):
+        raise radarr.RadarrError("down")
+    monkeypatch.setattr(radarr, "poster", gone)
+    assert c.get("/api/poster/7").status_code == 200 and calls == [7]  # kept: Radarr isn't asked again
+    assert c.get("/api/poster/8").status_code == 404
+    assert TestClient(web.app).get("/api/poster/7").status_code == 401  # signed in only
+
+
+def test_suggestions_searched_before_ratings_are_rated_from_what_they_kept(monkeypatch):
+    from refetcharr import engine as eng
+    m = film(gb=60)
+    monkeypatch.setattr(eng.radarr, "movie", lambda mid: m)
+    monkeypatch.setattr(eng.radarr, "releases", lambda mid: [release("Film 2000 2160p WEB-DL DDP5 1 HDR H 265-A", gb=15),
+                                                             release("Film 2000 2160p WEB-DL HDR H 265-B", gb=14)])
+    e = eng.Engine()
+    e.suggest_one(7)
+    fresh = e.suggestions()[0]
+    old = e._load_json("suggestions.json", {})
+    rating_keys = ("rating", "video_rating", "audio_rating", "badge", "video_tier", "audio_tier", "video_bounds", "audio_bounds")
+    for x in [old["7"]["before"], *old["7"]["options"]]:  # as 1.7 kept them
+        for k in rating_keys:
+            x.pop(k, None)
+    e._save_json("suggestions.json", old)
+    again = e.suggestions()[0]
+    for was, now in zip([fresh["before"], *fresh["options"]], [again["before"], *again["options"]]):
+        assert {k: now[k] for k in rating_keys} == {k: was[k] for k in rating_keys}
+    assert again["options"][1]["audio_rating"] is None  # audio the title doesn't name stays unrated

@@ -61,6 +61,11 @@ def grab_problem(err: Exception) -> str:
     return f"Radarr couldn't grab it: {(m.group(1) if m else text.strip().splitlines()[-1])[:140]}"
 
 
+def _score(d: dict) -> dict:
+    """Just a file's ratings, for a list row's rating pill."""
+    return {k: d.get(k) for k in ("rating", "video_rating", "audio_rating", "badge", "video_tier")}
+
+
 def scan_row(m: dict, g: str | None, r: dict, q: dict | None) -> dict:
     """One film's row in the scan (the Oversized list and the CSV reports)."""
     f, mins = m["movieFile"], rules.minutes(m)
@@ -73,7 +78,9 @@ def scan_row(m: dict, g: str | None, r: dict, q: dict | None) -> dict:
             "saving_gb": round(rules.saving(m, r) / 1e9, 1), "slug": m.get("titleSlug") or str(m.get("tmdbId", "")),
             "path": f.get("path") or "", "release_group": rules.file_group(m), "picture_mbps": d["picture_mbps"],
             "audio": d["audio"], "channels": d["channels"], "atmos": d["atmos"], "video_tier": d["video_tier"],
-            "audio_tier": d["audio_tier"], "badge": d["badge"]}
+            "audio_tier": d["audio_tier"], "badge": d["badge"], "rating": d["rating"], "video_rating": d["video_rating"],
+            "audio_rating": d["audio_rating"], "video_bounds": d["video_bounds"], "audio_bounds": d["audio_bounds"],
+            "hdr": bool(d["hdr"]), "lossless": d["lossless"]}
 
 
 class Engine:
@@ -186,12 +193,19 @@ class Engine:
         state = store.load()
         s = config.load()
         ig = s["ignore"]
+        if not self.movies and any("rating" not in r for r in rows):  # rows scanned before 1.8 are rated from the library
+            try:
+                self.library()
+            except radarr.RadarrError:
+                pass  # they show their old tier until Radarr can be read
         by_id = {m["id"]: m for m in self.movies}
         for r in rows:
             m = by_id.get(r["id"])
-            if "badge" not in r and m and m.get("movieFile"):  # scanned before 1.5: rate it from the library
+            if "rating" not in r and m and m.get("movieFile"):  # scanned before 1.8: rate it from the library
                 d = quality.describe_file(m["movieFile"], rules.minutes(m), s.get("quality"))
-                r.update({k: d[k] for k in ("picture_mbps", "audio", "channels", "atmos", "video_tier", "audio_tier", "badge")})
+                r.update({k: d[k] for k in ("picture_mbps", "audio", "channels", "atmos", "video_tier", "audio_tier", "badge",
+                                            "rating", "video_rating", "audio_rating", "video_bounds", "audio_bounds", "lossless")})
+                r["hdr"] = bool(d["hdr"])
             e = state.get(str(r["id"]))
             r["refetch"] = e["status"] if e else ""
             r["problem"] = (e or {}).get("problem", "")
@@ -608,8 +622,8 @@ class Engine:
         now = e.get("after_file") or (quality.describe_file(m["movieFile"], rules.minutes(m), q) if m and m.get("movieFile") else {})
         before = (e.get("decision") or {}).get("before") or {}
         out, need = [], {}
-        if now.get("video_tier") == "LOW":
-            out.append("picture LOW")
+        if now.get("badge") == "LOW":
+            out.append(f"rated LOW ({now['rating']:.1f} of 5)" if now.get("rating") is not None else "rated LOW")
         was_hdr = before.get("hdr") if before else "2160" in (e.get("old_quality") or "")  # 4K Blu-rays and remuxes are HDR
         if now and was_hdr and not now.get("hdr"):
             out.append("lost HDR"); need["hdr"] = True
@@ -628,8 +642,9 @@ class Engine:
                 continue
             m = by_id.get(mid)
             issues, _ = self.issues(e, m, q)
-            now = e.get("after_file") or (quality.describe_file(m["movieFile"], rules.minutes(m), q) if m and m.get("movieFile") else {})
-            rows.append({"id": int(mid), "title": e["title"], "year": e.get("year"), "old_size": e["old_size"], "new_size": e.get("new_size"),
+            now = quality.rated(e.get("after_file"), q) or (quality.describe_file(m["movieFile"], rules.minutes(m), q) if m and m.get("movieFile") else {})
+            was = quality.rated((e.get("decision") or {}).get("before"), q) or {}
+            rows.append({"before": _score(was), "after": _score(now), "id": int(mid), "title": e["title"], "year": e.get("year"), "old_size": e["old_size"], "new_size": e.get("new_size"),
                          "old_quality": e.get("old_quality"), "freed": store.freed(e), "when": e.get("grabbed"), "problem": e.get("problem", ""),
                          "group": e.get("group") or "", "before_badge": ((e.get("decision") or {}).get("before") or {}).get("badge", ""),
                          "after_badge": now.get("badge", ""), "after_tier": now.get("video_tier", ""), "issues": issues,
@@ -705,7 +720,11 @@ class Engine:
         store.log("suggest", f"{m['title']} ({m.get('year')}): {len(options)} replacement(s) to pick from, of {len(releases)} releases", id=mid)
 
     def suggestions(self) -> list:
-        return sorted(self._load_json("suggestions.json", {}).values(), key=lambda x: x["at"], reverse=True)
+        q = config.load().get("quality")
+        out = []
+        for sg in self._load_json("suggestions.json", {}).values():  # searched before 1.8: rated from the bitrates kept
+            out.append({**sg, "before": quality.rated(sg.get("before"), q), "options": [quality.rated(o, q) for o in sg.get("options", [])]})
+        return sorted(out, key=lambda x: x["at"], reverse=True)
 
     def dismiss(self, ids: list) -> str:
         sugg = self._load_json("suggestions.json", {})

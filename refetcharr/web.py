@@ -1,6 +1,7 @@
 """The HTTP API and the web UI. The TUI uses the same API, so both always show and do the same things."""
 
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -356,6 +357,28 @@ def pick(body: PickIn):
         return {"message": engine.pick(body.id, body.guid)}
     except ValueError as e:
         raise HTTPException(409, str(e)) from None
+
+
+POSTER_DAYS = 30  # a cached poster is fetched from Radarr again after this long
+
+
+@app.get("/api/poster/{mid}")
+def poster(mid: int):
+    """A film's poster for the cover view: fetched from Radarr once and kept in the data folder (about 20 KB each)."""
+    path = os.path.join(config.DATA, "posters", f"{int(mid)}.jpg")
+    have = os.path.exists(path)
+    if not have or time.time() - os.path.getmtime(path) > POSTER_DAYS * 86400:
+        try:
+            data = radarr.poster(mid)
+        except radarr.RadarrError:
+            if not have:
+                raise HTTPException(404, "No poster for that film") from None
+        else:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(path + ".tmp", path)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/films/{mid}")

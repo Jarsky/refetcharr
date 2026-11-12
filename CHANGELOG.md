@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.8.0 (2026-11-13)
+
+- **Ratings out of 5**: picture and audio are each rated 0 to 5 against your thresholds (Settings → Quality), which
+  land on fixed marks: LOW under 2.0, MEDIUM 2.0 to 3.5, HIGH from 3.5, up to 5.0 at 1.6 times the HIGH threshold.
+  Lossless audio is 5.0. The overall rating weighs them as set (70% picture by default) and is shown everywhere a file
+  or release is, with a **score card** in each film's details and in Suggestions (now and your pick side by side):
+  resolution, the rating, and picture and audio bars with what HIGH needs. **Every release you can pick** in
+  Suggestions, and the file on disk, has its own compact score card (the rating, its tier, picture and audio bars),
+  and Activity → Replaced shows the rating before and after.
+- **The overall rating makes the decisions**: "HIGH" when picking a release is now 3.5 overall, so weak audio counts
+  against a release (a HIGH picture with stereo AAC no longer beats a slightly bigger one with DD+ 5.1); with none
+  HIGH, the best overall rating wins. Low quality films, Needs attention and Replace again ("better than the current
+  file") use the overall rating too. Your least picture rating stays a picture-only floor. Suggestions found before
+  1.8 are rated from the bitrates they kept (their best pick stays as that search ranked it until searched again). Audio a release title doesn't name is unrated (no credit for a guess):
+  its rating is the picture's.
+- **Covers**: Flagged films and Suggestions have a List / Covers switch (remembered). Posters come from Radarr once and
+  are kept in the data folder (about 20 KB each); click one for the film's details.
+- **Filters and sorting**: Flagged films filters by rating, resolution, HDR and Atmos, and sorts by rating. Suggestions
+  finds a title, filters (with releases, nothing qualified, your picks, getting smaller or bigger, the pick's rating
+  and resolution) and sorts (recently searched, biggest saving or growth, size now or picked, best pick rating, biggest
+  rating gain, title).
+- **Summary tiles**: the selection estimates are tiles (films, size now, size after, saves or adds, freed and added,
+  average rating before and after) instead of a sentence.
+
 ## 1.7.0 (2026-11-13)
 
 - **Profiles** (Settings → Replacement): **Max savings** (the smallest release that qualifies, MEDIUM picture is enough,
