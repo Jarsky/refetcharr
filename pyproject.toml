@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "refetcharr"
+dynamic = ["version"]
+description = "Find oversized movies in Radarr and swap them for smaller releases that keep the quality you want"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["rich==13.9.4", "pyfiglet==1.0.2", "fastapi==0.115.6", "uvicorn==0.34.0"]
+
+[project.urls]
+Homepage = "https://github.com/Jarsky/refetcharr"
+Changelog = "https://github.com/Jarsky/refetcharr/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "ruff"]
+
+[project.scripts]
+refetcharr = "refetcharr.cli:main"
+
+[tool.setuptools]
+packages = ["refetcharr"]
+
+[tool.setuptools.package-data]
+refetcharr = ["static/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "refetcharr.VERSION" }
+
+[tool.ruff]
+line-length = 150
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "W"]
+ignore = ["E701", "E702", "E731", "E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: ffmpeg (the file checks use ffprobe)
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check refetcharr tests
+      - name: Tests
+        run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t refetcharr:ci .
+      - name: It starts and answers its health check
+        run: |
+          docker run -d --name refetcharr -p 8787:8787 refetcharr:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/api/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs refetcharr
+          exit 1

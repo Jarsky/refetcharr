@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refetcharr</title>
+<link rel="icon" href="/static/logo-64.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/logo-192.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="app">
+<aside class="side" id="side" aria-label="Main menu">
+  <a class="brand" href="#dashboard"><img src="/static/logo-64.png" alt="" width="32" height="32"><span>Refetcharr</span></a>
+  <nav class="nav" id="nav">
+    <div class="nav-group" data-group="dashboard">
+      <a class="nav-top" href="#dashboard" data-tab="dashboard">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/></svg>
+        <span>Dashboard</span><span class="badge info" id="b-dashboard" hidden></span></a>
+    </div>
+    <div class="nav-group" data-group="library">
+      <a class="nav-top" href="#library">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M8 5v4M12 5v4M16 5v4"/></svg>
+        <span>Library</span><span class="badge dot" id="b-library-top" hidden></span></a>
+      <div class="nav-sub">
+        <a href="#library" data-tab="library">Flagged films<span class="badge dot" id="b-library" hidden title="New scan"></span></a>
+        <a href="#suggestions" data-tab="suggestions">Suggestions<span class="badge info" id="b-suggestions" hidden></span></a>
+      </div>
+    </div>
+    <div class="nav-group" data-group="activity">
+      <a class="nav-top" href="#replaced">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
+        <span>Activity</span><span class="badge" id="b-activity" hidden></span></a>
+      <div class="nav-sub">
+        <a href="#replaced" data-tab="replaced">Replaced<span class="badge ok" id="b-replaced" hidden></span></a>
+        <a href="#failed" data-tab="failed">Not replaced<span class="badge" id="b-failed" hidden></span></a>
+        <a href="#events" data-tab="events">Events</a>
+      </div>
+    </div>
+    <div class="nav-group" data-group="settings">
+      <a class="nav-top" href="#replacement">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg>
+        <span>Settings</span><span class="badge" id="b-settings" hidden></span></a>
+      <div class="nav-sub">
+        <a href="#replacement" data-tab="replacement">Replacement</a>
+        <a href="#quality" data-tab="quality">Quality</a>
+        <a href="#queue" data-tab="queue">Queue &amp; schedule</a>
+        <a href="#radarr" data-tab="radarr">Radarr<span class="badge" id="b-radarr" hidden></span></a>
+        <a href="#timings" data-tab="timings">Timings</a>
+        <a href="#security" data-tab="security">Security</a>
+      </div>
+    </div>
+  </nav>
+  <div class="side-foot"><span id="version"></span><button id="logout" class="linkish" title="Sign out of Refetcharr">Sign out</button></div>
+</aside>
+<div class="scrim" id="scrim" hidden></div>
+
+<div class="page">
+<header class="top">
+  <button type="button" id="menu" class="menu-btn" aria-label="Menu" aria-controls="side" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <h1 id="page-title">Dashboard</h1>
+  <div class="state"><button type="button" id="mode" class="pill">…</button><span id="busy" class="busy"></span></div>
+  <div class="actions">
+    <button id="pause" class="btn">Pause</button>
+    <button id="scan" class="btn ghost">Rescan library</button>
+  </div>
+</header>
+
+<main>
+  <div id="error" class="error" hidden></div>
+
+  <section id="tab-dashboard" class="tab">
+    <section class="stats" aria-label="Summary">
+      <div class="stat"><b id="s-freed">–</b><span id="s-freed-label">freed</span></div>
+      <div class="stat"><b id="s-replaced">–</b><span>replaced</span></div>
+      <div class="stat" id="stat-active"><b id="s-active">–</b><span id="s-active-label">downloading</span></div>
+      <div class="stat"><b id="s-today">–</b><span>grabbed today</span></div>
+      <div class="stat warn"><b id="s-failed">–</b><span>not replaced</span></div>
+    </section>
+    <div class="card queue-now">
+      <div>
+        <h2>Queue the biggest wins</h2>
+        <p class="muted">They start one after another straight away, whatever the downloads-at-once and daily limits and the schedule. Pause still holds them.</p>
+      </div>
+      <form id="queue-form" class="inline">
+        <label for="queue-n" class="sr">How many films</label>
+        <input id="queue-n" type="number" min="1" max="500" value="10">
+        <button class="btn primary">Queue</button>
+        <button type="button" id="queue-clear" class="btn ghost">Clear waiting</button>
+      </form>
+    </div>
+    <div class="grid2 even">
+      <div class="card fill">
+        <h2>Downloads <span id="active-count" class="muted small"></span></h2>
+        <div id="active" class="scroll"></div>
+      </div>
+      <div class="card fill">
+        <h2>Recent activity <a href="#events" class="muted small more-link">all events</a></h2>
+        <ul id="activity" class="feed scroll"></ul>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Library scan <span id="scan-at" class="muted small"></span></h2>
+      <div id="scan-summary" class="groups"></div>
+    </div>
+  </section>
+
+  <section id="tab-library" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <input id="lib-q" type="search" placeholder="Find a title…" aria-label="Find a title">
+        <div id="lib-groups" class="chips" role="group" aria-label="Groups"></div>
+        <label class="check"><input id="lib-untried" type="checkbox" checked> Not tried yet</label>
+        <label class="check"><input id="lib-ignored" type="checkbox"> Show ignored</label>
+        <button id="lib-queue" class="btn primary" disabled>Replace selected</button>
+        <button id="lib-suggest" class="btn" disabled title="Search now and list every qualifying release to pick from">Find replacements</button>
+        <button id="lib-ignore" class="btn" disabled>Ignore selected</button>
+        <span id="lib-count" class="muted small"></span>
+      </div>
+      <p class="muted small hint">Click a film for its details: why it's flagged, its picture and audio, and what a replacement must keep.
+        Find replacements searches now and lists every release that qualifies, to pick from under Suggestions.</p>
+      <div class="tablebox">
+        <table class="data">
+          <thead><tr>
+            <th class="pick"><input id="lib-all" type="checkbox" aria-label="Select all shown"></th>
+            <th data-sort="title">Film</th><th data-sort="group">Group</th><th data-sort="quality">Quality</th>
+            <th data-sort="badge_rank" title="Picture and audio for its resolution (Settings → Quality)">Rating</th>
+            <th data-sort="size_gb" class="r">Size</th><th data-sort="mb_per_min" class="r">MB/min</th>
+            <th data-sort="saving_gb" class="r">Saves about</th><th>Refetcharr</th>
+          </tr></thead>
+          <tbody id="lib-rows" data-cols="9"></tbody>
+        </table>
+      </div>
+      <button id="lib-more" class="btn ghost more" hidden>Show more</button>
+    </div>
+  </section>
+
+  <section id="tab-replaced" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <input id="done-q" type="search" placeholder="Find a title…" aria-label="Find a title">
+        <div class="chips" role="group" aria-label="Show">
+          <button type="button" class="chip" data-show="all" aria-pressed="true">All <span id="done-n-all"></span></button>
+          <button type="button" class="chip" data-show="issues" aria-pressed="false" style="--c: var(--red)">Needs attention <span id="done-n-issues"></span></button>
+        </div>
+        <button id="done-again" class="btn primary" disabled title="Search for a better file: any size up to the maximum, winning back what was lost">Replace again</button>
+        <button id="done-suggest" class="btn" disabled title="Search now and list the better releases to pick from">Find replacements</button>
+      </div>
+      <p class="muted small hint">Click a film to see what changed, from what to what, and why that release was picked. Needs attention: the picture rates
+        LOW now, or HDR or surround sound was lost. Replace again looks for a better file, of any size up to the maximum.</p>
+      <div class="tablebox">
+        <table class="data">
+          <thead><tr><th class="pick"><input id="done-all" type="checkbox" aria-label="Select all shown"></th><th>Film</th><th>When</th><th>Was</th><th title="Before → after (Settings → Quality)">Rating</th><th class="r">Before</th><th class="r">After</th><th class="r">Freed</th></tr></thead>
+          <tbody id="done-rows" data-cols="8"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-suggestions" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <p class="muted">Films searched with Find replacements, and every release that qualified. Click a film to compare them and grab the one you want.
+          The first is the one Refetcharr would pick. <span id="sg-busy" class="msg info"></span></p>
+        <button id="sg-grab" class="btn primary" disabled title="Grab the best option of each selected film">Grab best picks</button>
+        <button id="sg-again" class="btn" disabled>Search again</button>
+        <button id="sg-clear" class="btn ghost" disabled>Clear selected</button>
+      </div>
+      <div class="tablebox">
+        <table class="data">
+          <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Film</th><th>Now</th><th>Best pick</th><th class="r">Saves</th><th class="r">Options</th><th>Searched</th></tr></thead>
+          <tbody id="sg-rows" data-cols="7"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-failed" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <p class="muted">Films that were tried but kept their original file. Click one to see every release that was turned down and why. Retry when new releases or seeders may have turned up.</p>
+        <button id="retry-sel" class="btn" disabled>Retry selected</button>
+        <button id="retry-all" class="btn primary">Retry all</button>
+      </div>
+      <div class="tablebox">
+        <table class="data">
+          <thead><tr><th class="pick"><input id="fail-all" type="checkbox" aria-label="Select all"></th><th>Film</th><th>Status</th><th>Why</th><th class="r">Size</th></tr></thead>
+          <tbody id="fail-rows" data-cols="5"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-events" class="tab" hidden>
+    <div class="card">
+      <div class="toolbar">
+        <input id="ev-q" type="search" placeholder="Find…" aria-label="Find in events">
+        <div id="ev-kinds" class="chips" role="group" aria-label="Kinds"></div>
+        <span id="ev-count" class="muted small"></span>
+      </div>
+      <div class="tablebox">
+        <table class="data events">
+          <thead><tr><th>When</th><th>Kind</th><th>What happened</th></tr></thead>
+          <tbody id="ev-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-replacement" class="tab" hidden>
+    <form id="rules" class="stack">
+      <div class="card">
+        <h2>What to go after</h2>
+        <p class="muted">Which kinds of film Refetcharr looks for replacements for.</p>
+        <div id="set-groups" class="switches"></div>
+      </div>
+      <div class="card">
+        <h2>Keep from the original</h2>
+        <p class="muted">What a replacement must not lose. Each is checked twice: on the release title before it's grabbed, and on the downloaded
+          file before it replaces anything (a file that fails stays in qBittorrent and the original stays).</p>
+        <div class="switches two">
+          <label class="switch"><input type="checkbox" name="keep_hdr"><span>Keep HDR <small>an HDR or Dolby Vision film's replacement must say HDR or DV, and the file must really be HDR</small></span></label>
+          <label class="switch"><input type="checkbox" name="keep_surround"><span>Keep surround sound <small>a 5.1 or 7.1 film mustn't become stereo</small></span></label>
+          <label class="switch"><input type="checkbox" name="keep_atmos"><span>Keep Atmos <small>an Atmos film's replacement must have Atmos too (DD+ Atmos counts)</small></span></label>
+          <label class="switch"><input type="checkbox" name="keep_lossless"><span>Keep lossless audio <small>TrueHD, DTS-HD MA, FLAC or PCM stay lossless. Remuxes have it, so this rules out most savings</small></span></label>
+          <label class="switch"><input type="checkbox" name="keep_english"><span>Keep English audio <small>a film that has it must not lose it</small></span></label>
+          <label class="switch"><input type="checkbox" name="untagged_is_english"><span>Untagged audio counts as English <small>many encodes leave the language blank ("und"); a file naming only other languages is still refused</small></span></label>
+        </div>
+        <p class="muted small">The least picture quality a replacement may have is under <a href="#quality">Quality</a>.</p>
+      </div>
+      <div class="card">
+        <h2>Leave alone</h2>
+        <p class="muted">Films whose current file is from one of these release groups are never replaced, and releases from the second list are never downloaded.
+          Names are matched whole, in any case. Films you ignore one by one (Oversized films → Ignore selected) are listed at the bottom.</p>
+        <div class="grid2">
+          <div><h3>Keep films from these groups</h3><div id="ig-file_groups" class="taglist"></div></div>
+          <div><h3>Never download from these groups</h3><div id="ig-release_groups" class="taglist"></div></div>
+        </div>
+        <h3>Films ignored one by one</h3>
+        <div id="ig-films"></div>
+      </div>
+      <div class="card">
+        <h2>File sizes</h2>
+        <p class="muted">Drag the markers, like Radarr's quality sizes. Sizes are MB per minute of runtime, so long films get more room.
+          Above Maximum a film counts as oversized, a replacement must be at least Minimum, Preferred is what a good one comes in at, and below Too small an x265 file is flagged.</p>
+        <div id="sizes"></div>
+        <div class="sliders">
+          <label class="range"><span>New file at most <output name="max_ratio_o"></output> of the old one</span><input type="range" name="max_ratio" min="10" max="100" step="5"></label>
+          <label class="range"><span>Leave films alone under <output name="min_runtime_o"></output></span><input type="range" name="min_runtime" min="0" max="120" step="5"></label>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h2>Preferred video codecs</h2><div id="list-video"></div></div>
+        <div class="card"><h2>Preferred audio codecs</h2><div id="list-audio"></div></div>
+      </div>
+      <div class="card">
+        <h2>Release requirements</h2>
+        <div class="sliders">
+          <label class="range"><span>At least <output name="min_seeders_o"></output></span><input type="range" name="min_seeders" min="0" max="100"></label>
+        </div>
+        <div class="switches two">
+          <label class="switch"><input type="checkbox" name="reject_dv_no_hdr10"><span>Refuse Dolby Vision without HDR10 <small>for TVs that can't play DV-only</small></span></label>
+          <label class="switch"><input type="checkbox" name="reject_negative_score"><span>Refuse negative format scores <small>from Radarr's custom formats</small></span></label>
+          <label class="switch"><input type="checkbox" name="prefer_higher_res"><span>Prefer the highest resolution <small>it beats everything else when choosing</small></span></label>
+          <label class="switch"><input type="checkbox" name="allow_lower_res"><span>Allow a lower resolution <small>a 4K film could become 1080p</small></span></label>
+          <label class="switch"><input type="checkbox" name="allow_usenet"><span>Allow usenet releases <small>Radarr needs a usenet client</small></span></label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Stalled downloads</h2>
+        <p class="muted">A download with no progress for this long gets a warning and stops taking up a download slot, so another film can start.
+          It stays in the list and still imports if it finishes.</p>
+        <div class="sliders">
+          <label class="range"><span>Stalled after <output name="stall_warn_hours_o"></output></span><input type="range" name="stall_warn_hours" min="0" max="72"></label>
+        </div>
+      </div>
+      <div class="savebar"><button class="btn primary">Save</button><button type="button" id="rules-reset" class="btn ghost">Back to defaults</button>
+        <span id="rules-saved" class="muted small" role="status"></span></div>
+    </form>
+  </section>
+
+  <section id="tab-quality" class="tab" hidden>
+    <form id="quality" class="stack">
+      <div class="card">
+        <h2>Ratings</h2>
+        <p class="muted">The thresholds that rate a file LOW, MEDIUM or HIGH. The picture is rated for its resolution, in x265 terms: the audio's share
+          is taken off the file size first, and other codecs are converted with the factors below (x264 needs about 1.5× the bitrate of x265 for the same picture).
+          Ratings show in the lists and each film's details, and the least a replacement may have is set below.</p>
+        <div class="seg" id="q-res" role="tablist" aria-label="Resolution"></div>
+        <p class="muted small" id="q-res-note"></p>
+        <div class="grid2">
+          <div class="tierbox"><h3>Picture bitrate</h3><div id="q-video"></div></div>
+          <div class="tierbox"><h3>Audio bitrate <small class="muted">all resolutions; lossless is always HIGH</small></h3><div id="q-audio"></div></div>
+        </div>
+        <p class="example" id="q-example"></p>
+      </div>
+      <div class="card">
+        <h2>Replacements</h2>
+        <p class="muted">The least picture rating a replacement may have, worked out from its title and size before it's grabbed.</p>
+        <div class="chips seg-chips" id="q-min" role="radiogroup" aria-label="Least picture rating for a replacement"></div>
+        <p class="muted" style="margin-top:14px">Which qualifying release to pick.</p>
+        <div class="chips seg-chips" id="q-prefer" role="radiogroup" aria-label="Which release to pick"></div>
+        <div class="sliders">
+          <label class="range"><span>A film's overall rating is <output name="video_weight_o"></output></span><input type="range" name="video_weight" min="0" max="100" step="5"></label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Codec efficiency</h2>
+        <p class="muted">How much more bitrate each codec needs than x265 for the same picture. Lower is more efficient.</p>
+        <div class="fields" id="q-codecs"></div>
+      </div>
+      <div class="savebar"><button class="btn primary">Save</button><button type="button" id="quality-reset" class="btn ghost">Back to defaults</button>
+        <span id="quality-saved" class="muted small" role="status"></span></div>
+    </form>
+  </section>
+
+  <section id="tab-queue" class="tab" hidden>
+    <form id="settings" class="card">
+      <h2>Queue</h2>
+      <label class="switch"><input type="checkbox" name="auto"><span>Auto-queue <small>keep downloads topped up by itself</small></span></label>
+      <div class="fields">
+        <label>Downloads at once<input type="number" name="max_active" min="1" max="100"></label>
+        <label>Films grabbed per day <small>0 = no limit</small><input type="number" name="max_per_day" min="0" max="1000"></label>
+        <label>Rescan the library every <small>days, 0 = by hand</small><input type="number" name="every_days" min="0" max="90"></label>
+      </div>
+      <h3>Schedule</h3>
+      <label class="switch"><input type="checkbox" name="w_enabled"><span>Only start searches during these days and hours</span></label>
+      <div id="set-days" class="days" role="group" aria-label="Days"></div>
+      <div class="fields">
+        <label>From<input type="time" name="w_start"></label>
+        <label>Until <small>can run past midnight</small><input type="time" name="w_end"></label>
+      </div>
+      <div class="save"><button class="btn primary">Save</button><span id="saved" class="muted small" role="status"></span></div>
+    </form>
+  </section>
+
+  <section id="tab-radarr" class="tab" hidden>
+    <div class="grid2">
+      <form id="conn" class="card" autocomplete="off">
+        <h2>Radarr connection</h2>
+        <div class="fields one">
+          <label>Address<input type="url" name="radarr_url" placeholder="http://radarr:7878"><small id="conn-url-note"></small></label>
+          <label>API key <small>Radarr → Settings → General</small><input type="password" name="radarr_api_key" autocomplete="new-password"><small id="conn-key-note"></small></label>
+          <label>Address for links <small>Radarr as your browser reaches it, for the film links</small><input type="url" name="radarr_link" placeholder="https://radarr.example.com"><small id="conn-link-note"></small></label>
+          <label>Refetcharr's address for Radarr <small>how Radarr reaches Refetcharr, for its import webhook (same Docker network: http://refetcharr:8787)</small><input type="url" name="refetcharr_url" placeholder="http://refetcharr:8787"></label>
+        </div>
+        <div class="save"><button class="btn primary">Save</button><button type="button" id="conn-test" class="btn">Test</button>
+          <span id="conn-result" class="muted small" role="status"></span></div>
+      </form>
+      <div class="card">
+        <div class="setup-head"><h2>Radarr setup</h2><button type="button" id="setup-fix-all" class="btn primary" hidden>Fix all</button>
+          <button type="button" id="setup-refresh" class="btn ghost">Check again</button></div>
+        <p class="muted">What Refetcharr relies on in Radarr. Mostly it stops Radarr upgrading replaced films straight back to remuxes, and the webhook
+          tells Refetcharr about new files as they arrive. Fixes change Radarr only when you press them.</p>
+        <ul id="setup" class="checks"><li class="empty">Checking…</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-timings" class="tab" hidden>
+    <form id="timing" class="card">
+      <h2>Timings</h2>
+      <p class="muted">How long Refetcharr waits on Radarr and qBittorrent before it decides something. The defaults suit most setups.</p>
+      <div class="fields">
+        <label>Gone from Radarr's queue after <small>minutes; it can briefly drop out when qBittorrent is slow</small><input type="number" name="missing_minutes" min="1" max="1440"></label>
+        <label>Ask Radarr to import again after <small>minutes</small><input type="number" name="import_wait_minutes" min="1" max="1440"></label>
+        <label>Give up on a download with no video file after <small>hours; scene releases can still be unpacking</small><input type="number" name="no_video_hours" min="1" max="72"></label>
+        <label>Warn when qBittorrent hasn't completed a download after <small>minutes</small><input type="number" name="finish_warn_minutes" min="1" max="1440"></label>
+        <label>Read the library from Radarr again after <small>minutes</small><input type="number" name="library_minutes" min="1" max="1440"></label>
+        <label>Check Radarr's setup every <small>minutes</small><input type="number" name="setup_minutes" min="1" max="1440"></label>
+      </div>
+      <div class="save"><button class="btn primary">Save</button><button type="button" id="timing-reset" class="btn ghost">Back to defaults</button>
+        <span id="timing-saved" class="muted small" role="status"></span></div>
+    </form>
+  </section>
+
+  <section id="tab-security" class="tab" hidden>
+    <div class="grid2">
+      <form id="security" class="card sec" autocomplete="off">
+        <h2>Sign-in</h2>
+        <p class="muted">One login protects the web UI and the API. Changing it signs out every other browser.
+          Locked out? In the container: <code>refetcharr login set &lt;username&gt;</code>.</p>
+        <div class="fields one">
+          <label>Username<input name="username" autocomplete="username" maxlength="64" required></label>
+          <label>New password <small>blank keeps the current one; at least 8 characters</small><input name="password" type="password" autocomplete="new-password" maxlength="200"></label>
+          <label>New password again<input name="confirm" type="password" autocomplete="new-password" maxlength="200"></label>
+          <label>Current password <small>needed for any change</small><input name="current" type="password" autocomplete="current-password" maxlength="200" required></label>
+        </div>
+        <div class="save"><button class="btn primary">Save</button><span id="sec-saved" class="muted small" role="status"></span></div>
+      </form>
+      <div class="card sec">
+        <h2>API key</h2>
+        <p class="muted">For scripts and other apps: send it as the <code>X-Api-Key</code> header. The terminal UI and the
+          <code>refetcharr</code> commands in the container use it by themselves, and Radarr's webhook carries it in its address
+          (a new key needs the webhook fixed again under Radarr).</p>
+        <div class="apikey"><code id="apikey">••••••••••••••••••••••••••••••••</code>
+          <button type="button" id="key-show" class="btn">Show</button>
+          <button type="button" id="key-new" class="btn ghost">New key</button></div>
+        <p id="key-msg" class="muted small" role="status"></p>
+      </div>
+    </div>
+  </section>
+</main>
+</div>
+<dialog id="scan-confirm" class="confirm" aria-labelledby="scan-title">
+  <form method="dialog">
+    <h2 id="scan-title">Rescan the library?</h2>
+    <p>This reads every film from Radarr and rebuilds the oversized list and reports. It can take some time, and Radarr may be slower while it runs. Downloads carry on as normal.</p>
+    <div class="save"><button value="scan" class="btn primary">Rescan</button><button value="cancel" class="btn ghost" autofocus>Cancel</button></div>
+  </form>
+</dialog>
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

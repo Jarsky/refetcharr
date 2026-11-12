@@ -1,0 +1,12 @@
+.env
+config/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+.pytest_cache/
+.ruff_cache/
+*.bak*
+# local only
+/Neon *.png
+.venv/

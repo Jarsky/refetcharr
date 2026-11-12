@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refetcharr · Sign in</title>
+<link rel="icon" href="/static/logo-64.png" type="image/png">
+<link rel="apple-touch-icon" href="/static/logo-192.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+<main class="login">
+  <div class="brand"><img src="/static/logo-64.png" alt="" width="40" height="40"><span>Refetcharr</span></div>
+  <form id="login" class="card" autocomplete="on">
+    <h1 id="title">Sign in</h1>
+    <p id="intro" class="muted"></p>
+    <label>Username<input name="username" autocomplete="username" required maxlength="64" autofocus></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="200"></label>
+    <label id="confirm-row" hidden>Password again<input name="confirm" type="password" autocomplete="new-password" maxlength="200"></label>
+    <label class="check"><input name="remember" type="checkbox" checked> Keep me signed in for 30 days</label>
+    <button class="btn primary" id="go">Sign in</button>
+    <p id="msg" class="bad-text small" role="alert"></p>
+    <p class="muted small">Forgotten it? In the container: <code>refetcharr login set &lt;username&gt;</code> or <code>refetcharr login reset</code>.</p>
+  </form>
+</main>
+<script src="/static/login.js"></script>
+</body>
+</html>

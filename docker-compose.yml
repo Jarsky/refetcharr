@@ -1,0 +1,31 @@
+# Refetcharr: one container with the web UI, the API and the worker. The terminal UI runs inside it.
+#   cp .env.example .env && chmod 600 .env       # then set MEDIA_PATH and DOCKER_NETWORK
+#   docker compose up -d --build                 # first time / after an update
+#   docker exec -it refetcharr refetcharr        # the terminal UI
+#   docker logs -f refetcharr                    # server output
+# Web UI: http://<host>:8787. Everything else is set in the app (Settings).
+services:
+  refetcharr:
+    build: .
+    image: refetcharr:local                        # or ghcr.io/jarsky/refetcharr:latest (then drop "build")
+    container_name: refetcharr                     # Radarr's webhook reaches it as http://refetcharr:8787
+    user: "${PUID:-1000}:${PGID:-1000}"
+    init: true
+    restart: unless-stopped
+    mem_limit: ${MEM_LIMIT:-512m}
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+      - RADARR_URL=${RADARR_URL:-http://radarr:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY:-}          # or set it in Settings → Radarr
+    ports:
+      - "${WEB_PORT:-8787}:8787"
+    volumes:
+      - ./config:/config                            # settings, state, activity log, reports
+      - ${MEDIA_PATH:?set MEDIA_PATH in .env}:/data:ro   # the folder Radarr sees as /data, read-only (for the file checks)
+    networks:
+      - arr
+
+networks:
+  arr:
+    name: ${DOCKER_NETWORK:?set DOCKER_NETWORK in .env (the Docker network Radarr is on)}
+    external: true
