@@ -24,6 +24,10 @@ GROWABLE = ("tiny",)
 UPGRADE = ("lowq",)  # judged on getting better, not on size (and films queued again by hand: mode="upgrade")
 PREFER = ("high", "size")  # rank by: the smallest HIGH release (else the best MEDIUM), or the size nearest Preferred
 GROW_MIN = 1.1  # a replacement for a tiny file must be at least this much bigger to be worth the download
+# Among HIGH releases, sizes within this share of the smallest count as the same size: only then do your audio codec
+# preferences decide. Without it a lossless-audio release won however much bigger it was (1.6.3: top picks 4 GB bigger
+# than an equally HIGH one). audio_before_size (the Max quality profile) puts audio first again.
+SIZE_BAND = 0.10
 
 DV = re.compile(r"\b(dv|dovi|dolby[ ._-]?vision)\b", re.I)
 HDR = re.compile(r"\bhdr(10)?(\+|plus)?\b", re.I)
@@ -293,8 +297,9 @@ def explain(m: dict, chosen: dict, ok: list, total: int, r: dict, q: dict | None
 def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | None = None,
          keep: list | None = None, mode: str = "", need: dict | None = None) -> tuple[dict | None, list[str]]:
     """The best qualifying release, and a note per release that didn't qualify. With prefer "high" (the default): the
-    highest resolution, then the best picture rating, then your preferred codecs, then the smallest HIGH release (or,
-    with none HIGH, the best MEDIUM picture), then Radarr's format score and seeders. With prefer "size": resolution,
+    highest resolution, then the best picture rating, then your preferred video codec, then the smallest HIGH release
+    (your audio codec preference only between HIGH releases within SIZE_BAND of each other, unless audio_before_size),
+    or, with none HIGH, your preferred audio then the best MEDIUM picture; then Radarr's format score and seeders. With prefer "size": resolution,
     codecs, format score, the size nearest Preferred, seeders. `keep`, a list, receives the qualifying releases in rank
     order (for explain())."""
     mins = minutes(m) or 1
@@ -308,6 +313,11 @@ def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | 
             ok.append(rel)
 
     desc = {id(rel): quality.describe_release(rel, mins, q) for rel in ok}
+    smallest: dict = {}  # resolution -> the smallest HIGH release's size
+    for rel in ok:
+        if desc[id(rel)]["video_tier"] == "HIGH":
+            res = rel["quality"]["quality"].get("resolution") or 0
+            smallest[res] = min(smallest.get(res, rel["size"]), rel["size"])
 
     def rank(rel):
         res = rel["quality"]["quality"].get("resolution") or 0
@@ -315,9 +325,14 @@ def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | 
         if r.get("prefer", "high") == "high":
             d = desc[id(rel)]
             tier = TIER_RANK[d["video_tier"]]
-            within = rel["size"] / 1e9 if tier == 2 else -d["picture_mbps"]  # HIGH: the smallest; below it: the best picture
-            return (-res if r["prefer_higher_res"] else 0, -tier, *codecs, round(within, 1), -(rel.get("customFormatScore") or 0),
-                    -(rel.get("seeders") or 0))
+            top = (-res if r["prefer_higher_res"] else 0, -tier)
+            tail = (-(rel.get("customFormatScore") or 0), -(rel.get("seeders") or 0))
+            if tier == 2:  # HIGH: the smallest, your audio preference only between near-equal sizes
+                band = int((rel["size"] / (smallest.get(res) or rel["size"]) - 1) / SIZE_BAND)
+                size = round(rel["size"] / 1e9, 1)
+                order = (codecs[1], band, size) if r.get("audio_before_size") else (band, codecs[1], size)
+                return (*top, codecs[0], *order, *tail)
+            return (*top, *codecs, round(-d["picture_mbps"], 1), *tail)  # below HIGH: the best picture
         pref = preferred(res, r)
         return (-res if r["prefer_higher_res"] else 0, *codecs, -(rel.get("customFormatScore") or 0),
                 round(abs(rel["size"] / 1e6 / mins - pref) / pref, 1), -(rel.get("seeders") or 0))

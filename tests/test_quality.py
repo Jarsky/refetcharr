@@ -266,3 +266,30 @@ def test_a_download_waiting_in_the_queue_is_not_stalled():
     e._track_progress("7", store.load()["7"], {"status": "queued", "sizeleft": int(5e9)}, config.load()["rules"])
     entry = store.load()["7"]
     assert not entry.get("stalled") and entry["progress_at"] > "2026-11-01T10:00:00"
+
+
+def test_audio_preference_only_decides_between_high_releases_of_about_the_same_size():
+    """1.6.3: Robin Hood's 29 GB DTS-HD MA release beat a 20 GB DD+ one of the same HIGH picture."""
+    m = film(gb=60)
+    r = {**R, "audio_codecs": ["dtshd", "eac3"]}
+    lossless = release("Film 2000 2160p WEB-DL DTS-HD MA 5 1 HDR H 265-A", gb=29)
+    plus = release("Film 2000 2160p WEB-DL DDP 5 1 HDR H 265-B", gb=20)
+    assert rules.best(m, [lossless, plus], r)[0] is plus  # 45% bigger: size wins
+    near = release("Film 2000 2160p WEB-DL DTS-HD MA 5 1 HDR H 265-C", gb=21)
+    assert rules.best(m, [plus, near], r)[0] is near  # within 10%: your audio preference decides
+    assert rules.best(m, [plus, lossless], {**r, "audio_before_size": True})[0] is lossless  # Max quality: audio first
+    for rel in (lossless, plus, near):
+        assert quality.describe_release(rel, 120, None)["video_tier"] == "HIGH"
+
+
+def test_suggestions_list_a_release_once_when_two_indexers_have_it(monkeypatch):
+    from refetcharr import engine as eng
+    m = film(gb=60)
+    a = release("Film 2000 2160p WEB-DL DDP5 1 HDR H 265-A", gb=15)
+    twin = {**a, "guid": "other-indexer", "indexerId": 2}
+    b = release("Film 2000 2160p WEB-DL DDP5 1 HDR H 265-B", gb=18)
+    monkeypatch.setattr(eng.radarr, "movie", lambda mid: m)
+    monkeypatch.setattr(eng.radarr, "releases", lambda mid: [a, twin, b])
+    e = eng.Engine()
+    e.suggest_one(7)
+    assert [o["title"] for o in e.suggestions()[0]["options"]] == [a["title"], b["title"]]

@@ -682,8 +682,14 @@ class Engine:
         ranked: list = []
         _, notes = rules.best(m, releases, r, s["ignore"]["release_groups"], q, keep=ranked, mode=mode, need=base["needs"])
         mins = rules.minutes(m)
-        options = []
-        for rel in ranked[:12]:
+        options, seen = [], set()
+        for rel in ranked:
+            key = re.sub(r"[^a-z0-9]", "", rel["title"].lower())  # the same release from two indexers: list it once
+            if key in seen:
+                continue
+            seen.add(key)
+            if len(options) == 12:
+                break
             d = quality.describe_release(rel, mins, q)
             options.append({**d, "guid": rel["guid"], "indexerId": rel.get("indexerId"), "saving": m["movieFile"]["size"] - rel["size"]})
         sugg = self._load_json("suggestions.json", {})

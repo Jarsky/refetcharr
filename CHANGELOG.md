@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.3 (2026-11-13)
+
+- **The smallest HIGH release wins again**: your audio codec order came before size, so a release with lossless
+  audio (DTS-HD MA, DTS:X, TrueHD) beat an equally HIGH one many GB smaller, even with Keep lossless off. Among HIGH
+  releases, size now comes first; your audio order only decides between releases within 10% of the same size. A
+  third of the suggestions picked a bigger file this way, a median of 3.9 GB more each. Audio you've chosen to keep
+  (Atmos, surround, lossless) is still required, as before. Run Find replacements again to re-rank suggestions.
+- A release that two indexers both list shows once in a film's suggestions.
+
 ## 1.6.2 (2026-11-12)
 
 - **Refused grabs**: Radarr says "Getting release from indexer failed" when qBittorrent refuses a torrent it already has
