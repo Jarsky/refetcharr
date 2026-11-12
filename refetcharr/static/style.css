@@ -349,3 +349,25 @@ table.cmp.opts td:first-child { width: auto; }
 }
 .error { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
 .error .x { background: none; border: 0; color: var(--fg); cursor: pointer; font: inherit; padding: 0 4px; opacity: .7; } .error .x:hover { opacity: 1; }
+
+/* 1.7.0: pick a suggestion by clicking it; replacement profiles; what a selection would save */
+.opt[data-choose] { cursor: pointer; transition: border-color .15s, background .15s; }
+.opt[data-choose]:hover { border-color: color-mix(in oklab, var(--violet) 50%, var(--line)); }
+.opt[data-choose]:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.opt.chosen { border-color: var(--violet); box-shadow: inset 0 0 0 1px var(--violet); background: color-mix(in oklab, var(--violet) 8%, var(--panel2)); }
+.opt .radio { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); flex: none; align-self: center; box-sizing: border-box; }
+.opt.chosen .radio { border-color: var(--violet); background: radial-gradient(circle, var(--violet) 0 38%, transparent 42%); }
+.pill-pick { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; white-space: nowrap;
+  color: var(--violet); border: 1px solid color-mix(in oklab, var(--violet) 60%, transparent); }
+.opt-grab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-top: 10px; }
+.est { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin: 10px 0 2px; padding: 9px 14px; font-size: 13px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; }
+.est .save { color: var(--mint); font-family: var(--mono); } .est .grew { font-family: var(--mono); }
+.est .est-with { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.profile { display: grid; gap: 6px; align-content: start; text-align: left; padding: 12px 14px; font: inherit; font-size: 13px; color: var(--muted);
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.profile b { color: var(--fg); font-size: 14px; }
+.profile:hover { border-color: color-mix(in oklab, var(--violet) 50%, var(--line)); }
+.profile[aria-checked=true] { border-color: var(--violet); box-shadow: inset 0 0 0 1px var(--violet); background: color-mix(in oklab, var(--violet) 10%, var(--panel2)); cursor: default; }
+.profiles-note { grid-column: 1 / -1; margin: 0; }

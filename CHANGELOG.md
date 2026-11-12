@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.0 (2026-11-13)
+
+- **Profiles** (Settings → Replacement): **Max savings** (the smallest release that qualifies, MEDIUM picture is enough,
+  Atmos not kept, smaller targets), **Balanced** (the defaults: HIGH at the smallest size) and **Max quality** (HIGH
+  only, Atmos and lossless kept, audio order ahead of size, roomier targets). Picking one saves its settings; change
+  any of them afterwards and it shows as Custom. A new release choice, **Smallest that qualifies**, is on the Quality
+  page too.
+- **Pick a suggestion by clicking it**: each film's releases are a list to choose from, with one Grab button for the
+  pick. Picks are remembered (and kept when the film is searched again and the release is still offered), and **Grab
+  picks** grabs each selected film's pick, the best one where you didn't pick.
+- **Estimates**: ticking films in Flagged films shows their size now, about what they'd be after, and the saving
+  (freed and added shown apart when some films grow). Films with suggestions use the real size of their pick; the
+  rest use the target size. **Estimate with** compares the profiles on the same films without changing anything.
+  Suggestions shows the same for the selected films' picks.
+
 ## 1.6.3 (2026-11-13)
 
 - **The smallest HIGH release wins again**: your audio codec order came before size, so a release with lossless

@@ -29,8 +29,11 @@ On one 4,900-film library it has freed **16 TB** so far.
   is replaced. A file that fails stays in your download client; the original stays.
 - **Quality ratings**: every file and release gets LOW / MEDIUM / HIGH, based on its picture bitrate for its resolution
   (in x265 terms: the audio's share taken off, other codecs converted) and its audio.
-- **Suggestions**: search now for chosen films and see every release that qualifies, side by side, then grab the best
-  pick or any other, one film or many at once.
+- **Profiles**: Max savings, Balanced or Max quality set the sizes, keep rules and picture rating in one click; tune
+  anything after and it's Custom.
+- **Suggestions**: search now for chosen films and see every release that qualifies, side by side. Click a release to
+  pick it; picks are remembered, so you can go film by film and grab them all at once.
+- **Estimates**: tick films to see their size now, about how big they'd be after, and the saving, with any profile.
 - **Replace again**: films that came out LOW, or lost HDR or surround, are listed under *Needs attention* and can be put
   right with a better file.
 - **Explains every decision**: open any film to see why it was flagged, the file before, the release chosen and the

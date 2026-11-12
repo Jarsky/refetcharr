@@ -293,3 +293,48 @@ def test_suggestions_list_a_release_once_when_two_indexers_have_it(monkeypatch):
     e = eng.Engine()
     e.suggest_one(7)
     assert [o["title"] for o in e.suggestions()[0]["options"]] == [a["title"], b["title"]]
+
+
+def test_profiles_set_their_rules_and_anything_else_is_custom():
+    from fastapi.testclient import TestClient
+    from refetcharr import auth, web
+    c = TestClient(web.app, headers={"X-Api-Key": auth.ensure_keys()["api_key"]})
+    assert c.get("/api/profiles").json()["current"] == "custom"  # these tests save their own rules
+    r = c.post("/api/profile", json={"id": "savings"})
+    assert r.status_code == 200 and "Max savings" in r.json()["message"]
+    saved = config.load()["rules"]
+    assert saved["prefer"] == "small" and saved["preferred_2160"] == 110 and not saved["keep_atmos"]
+    assert c.get("/api/profiles").json()["current"] == "savings"
+    config.save({"rules": {"preferred_2160": 120}})
+    assert c.get("/api/profiles").json()["current"] == "custom"
+    assert config.profile_of(config.DEFAULTS["rules"]) == "balanced"  # the defaults are Balanced
+    assert c.post("/api/profile", json={"id": "nope"}).status_code == 400
+
+
+def test_max_savings_takes_the_smallest_release_that_qualifies():
+    m = film(gb=60)
+    high = release("Film 2000 2160p WEB-DL DDP5 1 HDR H 265-HI", gb=20)
+    medium = release("Film 2000 2160p WEB-DL DDP5 1 HDR H 265-MED", gb=13)
+    r = {**R, "prefer": "small"}
+    assert quality.describe_release(medium, 120, None)["video_tier"] == "MEDIUM"
+    assert rules.best(m, [high, medium], r)[0] is medium
+    assert rules.best(m, [high, medium], R)[0] is high  # Balanced: HIGH first
+    assert any("smallest release that qualifies" in w for w in rules.explain(m, medium, [medium, high], 2, r))
+
+
+def test_a_picked_option_is_remembered_grabbed_in_bulk_and_kept_by_a_new_search(monkeypatch):
+    from refetcharr import engine as eng
+    m = film(gb=60)
+    a = release("Film 2000 2160p WEB-DL DDP5 1 Atmos HDR H 265-A", gb=15)
+    b = release("Film 2000 2160p WEB-DL DDP5 1 HDR H 265-B", gb=18)
+    monkeypatch.setattr(eng.radarr, "movie", lambda mid: m)
+    monkeypatch.setattr(eng.radarr, "releases", lambda mid: [b, a])
+    e = eng.Engine()
+    e.suggest_one(7)
+    assert e.suggestions()[0]["chosen"] == a["guid"]  # the best pick until you pick another
+    assert e.choose(7, b["guid"]) == "Picked." and e.suggestions()[0]["chosen"] == b["guid"]
+    with pytest.raises(ValueError):
+        e.choose(7, "nope")
+    e.suggest_one(7)  # search again: the same release is still offered, so your pick stays
+    assert e.suggestions()[0]["chosen"] == b["guid"]
+    assert "picked release for 1 film" in e.pick_best([7]) and list(e.jobs)[-1] == ("pick", 7, b["guid"])

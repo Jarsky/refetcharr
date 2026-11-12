@@ -117,6 +117,7 @@
         <button id="lib-ignore" class="btn" disabled>Ignore selected</button>
         <span id="lib-count" class="muted small"></span>
       </div>
+      <div id="lib-est" class="est" hidden aria-live="polite"></div>
       <p class="muted small hint">Click a film for its details: why it's flagged, its picture and audio, and what a replacement must keep.
         Find replacements searches now and lists every release that qualifies, to pick from under Suggestions.</p>
       <div class="tablebox">
@@ -160,15 +161,16 @@
   <section id="tab-suggestions" class="tab" hidden>
     <div class="card">
       <div class="toolbar">
-        <p class="muted">Films searched with Find replacements, and every release that qualified. Click a film to compare them and grab the one you want.
-          The first is the one Refetcharr would pick. <span id="sg-busy" class="msg info"></span></p>
-        <button id="sg-grab" class="btn primary" disabled title="Grab the best option of each selected film">Grab best picks</button>
+        <p class="muted">Films searched with Find replacements, and every release that qualified. Click a film to compare them, and click a release to pick it:
+          the pick is remembered, so you can go through films one by one and grab them all at once. Unpicked films take the best pick. <span id="sg-busy" class="msg info"></span></p>
+        <button id="sg-grab" class="btn primary" disabled title="Grab each selected film's pick (the best one unless you picked another)">Grab picks</button>
         <button id="sg-again" class="btn" disabled>Search again</button>
         <button id="sg-clear" class="btn ghost" disabled>Clear selected</button>
       </div>
+      <div id="sg-est" class="est" hidden aria-live="polite"></div>
       <div class="tablebox">
         <table class="data">
-          <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Film</th><th>Now</th><th>Best pick</th><th class="r">Saves</th><th class="r">Options</th><th>Searched</th></tr></thead>
+          <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Film</th><th>Now</th><th>Pick</th><th class="r">Saves</th><th class="r">Options</th><th>Searched</th></tr></thead>
           <tbody id="sg-rows" data-cols="7"></tbody>
         </table>
       </div>
@@ -209,6 +211,12 @@
 
   <section id="tab-replacement" class="tab" hidden>
     <form id="rules" class="stack">
+      <div class="card">
+        <h2>Profile</h2>
+        <p class="muted">A starting point for the sizes and keep rules below and the picture rating on the Quality page. Picking one saves it straight away;
+          change any of its settings afterwards and it shows as Custom.</p>
+        <div id="profiles" class="profiles" role="radiogroup" aria-label="Replacement profile"></div>
+      </div>
       <div class="card">
         <h2>What to go after</h2>
         <p class="muted">Which kinds of film Refetcharr looks for replacements for.</p>

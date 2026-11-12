@@ -286,7 +286,68 @@ function updateLibQueue() {
   $("lib-ignore").disabled = !n; $("lib-ignore").textContent = n ? `${allIgnored ? "Stop ignoring" : "Ignore"} ${n} selected` : "Ignore selected";
   $("lib-ignore").dataset.mode = allIgnored ? "off" : "on";
   $("lib-suggest").disabled = !n; $("lib-suggest").textContent = n ? `Find replacements for ${n}` : "Find replacements";
+  renderLibEst();
 }
+
+// ── 1.7.0: profiles and what a selection would save ───────────────────────
+let profiles = null, liveRules = null, estWith = "current";
+async function loadProfiles(force) {
+  if (profiles && !force) return;
+  try {
+    const [p, s] = await Promise.all([api("GET", "/api/profiles"), api("GET", "/api/settings")]);
+    profiles = p; liveRules = s.values.rules;
+  } catch { /* the estimate waits for the next try */ }
+}
+const profileLabel = (id) => (id === "custom" ? "Custom" : profiles?.profiles.find((p) => p.id === id)?.label || id);
+const rulesFor = (id) => (id === "current" ? liveRules : { ...liveRules, ...(profiles.profiles.find((p) => p.id === id)?.rules || {}) });
+const pickOf = (sg) => sg.options.find((o) => o.guid === sg.chosen) || sg.options[0];
+function estAfterGb(f, r) {   // what a replacement would likely weigh: the profile's target size, within its rules
+  const k = f.resolution >= 2000 ? 2160 : 1080, mins = f.runtime_min || 0;
+  const target = r[`preferred_${k}`] * mins / 1000;
+  if (f.group === "tiny") return Math.max(f.size_gb * 1.1, (r.prefer === "small" ? r[`min_${k}`] : r[`preferred_${k}`]) * mins / 1000);
+  if (f.group === "lowq") return Math.max(target, r[`min_${k}`] * mins / 1000);
+  return Math.min(target, f.size_gb * r.max_ratio);
+}
+const gb = (x) => size(x * 1e9);
+function estLine(n, now, after, freed, added, basis, what = "selected") {
+  const net = now - after;
+  return `<b>${n} ${what}</b><span>now ${gb(now)}</span><span>→ about ${gb(after)}</span>
+    <span class="${net >= 0 ? "save" : "grew"}">${net >= 0 ? "saves" : "adds"} ~${gb(Math.abs(net))}</span>
+    ${freed > 0.05 && added > 0.05 ? `<span class="muted">frees ${gb(freed)}, adds ${gb(added)}</span>` : ""}<span class="muted small">${basis}</span>`;
+}
+function renderLibEst() {
+  const box = $("lib-est"), ids = new Set([...document.querySelectorAll("#lib-rows input:checked")].map((i) => +i.value));
+  if (!ids.size) { box.hidden = true; return; }
+  if (!liveRules) { loadProfiles().then(() => { if (liveRules) renderLibEst(); }); loadSuggestions(true); return; }
+  const r = rulesFor(estWith), sel = films.filter((f) => ids.has(f.id));
+  let now = 0, after = 0, freed = 0, added = 0, real = 0;
+  for (const f of sel) {
+    const sg = estWith === "current" ? sugg.find((s) => s.id === f.id && s.options.length) : null, pick = sg && pickOf(sg);
+    const a = pick ? pick.size / 1e9 : estAfterGb(f, r);
+    if (pick) real++;
+    now += f.size_gb; after += a;
+    if (a < f.size_gb) freed += f.size_gb - a; else added += a - f.size_gb;
+  }
+  const basis = real === sel.length ? "from the releases found" : real ? `${real} from releases found, ${sel.length - real} from the target size` : "estimated from the target size";
+  const opts = [["current", `Your settings (${profileLabel(profiles.current)})`], ...profiles.profiles.filter((p) => p.id !== profiles.current).map((p) => [p.id, p.label])];
+  box.innerHTML = estLine(sel.length, now, after, freed, added, basis)
+    + `<label class="est-with">Estimate with <select id="est-with">${opts.map(([v, l]) => `<option value="${v}" ${v === estWith ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+  box.hidden = false;
+}
+$("lib-est").addEventListener("change", (e) => { if (e.target.id === "est-with") { estWith = e.target.value; renderLibEst(); } });
+async function loadProfileCards() {
+  await loadProfiles(true);
+  if (!profiles) return;
+  $("profiles").innerHTML = profiles.profiles.map((p) => `<button type="button" class="profile" role="radio" aria-checked="${p.id === profiles.current}" data-profile="${p.id}">
+      <b>${esc(p.label)}</b><span>${esc(p.blurb)}</span></button>`).join("")
+    + (profiles.current === "custom" ? `<p class="muted small profiles-note">Custom: your settings don't match a profile. Pick one to start from it.</p>` : "");
+}
+$("profiles").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-profile]");
+  if (!b || b.getAttribute("aria-checked") === "true") return;
+  if (!tracked.get("rules").btn.disabled && !confirm("Picking a profile saves it now and drops the unsaved changes on this page. Carry on?")) return;
+  act(async () => { const r = await api("POST", "/api/profile", { id: b.dataset.profile }); estWith = "current"; await loadRules(); return r; });
+});
 $("lib-rows").addEventListener("change", updateLibQueue);
 $("lib-all").addEventListener("change", (e) => { document.querySelectorAll("#lib-rows input").forEach((i) => (i.checked = e.target.checked)); updateLibQueue(); });
 $("lib-q").addEventListener("input", () => { libShown = 200; renderFilms(); });
@@ -546,6 +607,7 @@ async function loadRules() {
     catalog = d.catalog; ruleDefaults = d.defaults;
     fillRules(d.values.rules, d.values.queue.groups, d.values.ignore); clean("rules");
   } catch (e) { toast(e.message, "err"); }
+  loadProfileCards();
 }
 $("rules-reset").addEventListener("click", () => { fillRules(ruleDefaults.rules, ruleDefaults.queue.groups); say("rules-saved", "Defaults filled in (the leave-alone lists are kept). Nothing changes until you save.", "info"); recheck("rules"); });
 function rulesPatch() {
@@ -562,7 +624,7 @@ $("rules").addEventListener("submit", async (e) => {
   try {
     await api("PATCH", "/api/settings", rulesPatch());
     say("rules-saved", "Saved. New searches use these now; the Oversized list follows at the next rescan."); clean("rules");
-    refresh();
+    refresh(); loadProfileCards();
   } catch (err) { say("rules-saved", err.message, "err"); }
 });
 
@@ -691,7 +753,7 @@ const Q_RES = [["sd", "SD", 6, 0.1, "DVD and other standard definition"], ["720"
 const Q_CODECS = [["x265", "x265 / HEVC"], ["av1", "AV1"], ["vp9", "VP9"], ["x264", "x264 / AVC"], ["vc1", "VC-1"], ["mpeg2", "MPEG-2"], ["xvid", "XviD / DivX"]];
 const MIN_PICTURE = [["off", "Off"], ["low", "Any"], ["medium", "MEDIUM or better"], ["high", "HIGH only"]];
 let qv = null, qRes = "1080", qMin = "medium", qPrefer = "high", qDefaults = null;
-const PREFER = [["high", "Smallest HIGH, else the best MEDIUM"], ["size", "Nearest the Preferred size"]];
+const PREFER = [["high", "Smallest HIGH, else the best MEDIUM"], ["small", "Smallest that qualifies"], ["size", "Nearest the Preferred size"]];
 function tierSlider(id, lo, hi, max, step, unit) {
   return `<div class="tt" id="${id}-tt"><input type="range" min="0" max="${max}" step="${step}" value="${lo}" data-i="0" aria-label="Top of LOW">
     <input type="range" min="0" max="${max}" step="${step}" value="${hi}" data-i="1" aria-label="Top of MEDIUM"></div>
@@ -787,15 +849,22 @@ function facts(x) {
     x.seeders != null ? `<span class="fact">${x.seeders} seeders</span>` : ""].filter(Boolean).join("");
 }
 function optionCard(sg, o, i) {
-  return `<div class="opt ${i ? "" : "best"}">
+  const on = o.guid === pickOf(sg)?.guid;
+  return `<div class="opt ${i ? "" : "best"} ${on ? "chosen" : ""}" role="radio" tabindex="0" aria-checked="${on}" data-choose="${sg.id}" data-guid="${esc(o.guid)}"
+      title="${on ? "Your pick: Grab takes this one" : "Click to pick this release"}">
     <div class="opt-main">
-      <div class="opt-title">${i ? "" : '<span class="pill-best">Best pick</span>'}<span class="name">${esc(o.title)}</span></div>
+      <div class="opt-title"><span class="radio" aria-hidden="true"></span>${i ? "" : '<span class="pill-best">Best pick</span>'}${on && i ? '<span class="pill-pick">Your pick</span>' : ""}<span class="name">${esc(o.title)}</span></div>
       <div class="opt-meta">${esc([o.indexer, o.release_group, o.score ? `format score ${o.score}` : ""].filter(Boolean).join(" · "))}</div>
       <div class="facts">${facts(o)}</div>
     </div>
-    <div class="opt-side"><span class="opt-save">${saveText(o.saving)}</span>
-      <button type="button" class="btn sm" data-pick="${sg.id}" data-guid="${esc(o.guid)}">Grab</button></div>
+    <div class="opt-side"><span class="opt-save">${saveText(o.saving)}</span></div>
   </div>`;
+}
+function choosePick(id, guid) {
+  const sg = sugg.find((s) => s.id === id);
+  if (!sg || pickOf(sg)?.guid === guid) return;
+  const was = sg.chosen; sg.chosen = guid; renderSuggestions();
+  api("POST", "/api/suggestions/choose", { id, guid }).catch((e) => { sg.chosen = was; renderSuggestions(); toast(e.message, "err"); });
 }
 function suggDetail(sg) {
   const rej = sg.rejected || [];
@@ -804,7 +873,9 @@ function suggDetail(sg) {
     ${sg.flagged ? `<p class="dd-flag"><b>${sg.mode === "upgrade" ? "Putting right" : "Flagged"}</b>${esc(sg.flagged)}</p>` : ""}
     <div class="opt now"><div class="opt-main"><div class="opt-title"><span class="pill-now">Now on disk</span><span class="name">${esc(sg.before.name || sg.before.quality || "")}</span></div>
       <div class="facts">${facts(sg.before)}</div></div></div>
-    ${sg.options.length ? `<div class="opts">${sg.options.map((o, i) => optionCard(sg, o, i)).join("")}</div>`
+    ${sg.options.length ? `<div class="opts" role="radiogroup" aria-label="Releases for ${esc(sg.title)}">${sg.options.map((o, i) => optionCard(sg, o, i)).join("")}</div>
+      <div class="opt-grab"><span class="muted small">Click a release to pick it: the pick is remembered for Grab picks.</span>
+        <button type="button" class="btn primary sm" data-pick="${sg.id}" data-guid="${esc(pickOf(sg).guid)}">Grab ${pickOf(sg) === sg.options[0] ? "the best pick" : "your pick"} · ${size(pickOf(sg).size)}</button></div>`
       : `<p class="problem">Nothing qualified of ${sg.releases} releases. The reasons are below.</p>`}
     <div class="dd-cols">
       ${sg.why?.length ? `<div><h4>Why the best pick</h4><ul>${sg.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
@@ -814,11 +885,12 @@ function suggDetail(sg) {
 function renderSuggestions() {
   const keep = new Set([...document.querySelectorAll("#sg-rows input:checked")].map((i) => i.value));
   $("sg-rows").innerHTML = sugg.map((sg) => {
-    const best = sg.options[0], open = expanded.has(`sg-rows:${sg.id}`);
+    const best = sg.options.length ? pickOf(sg) : null, open = expanded.has(`sg-rows:${sg.id}`);
+    const mine = best && best !== sg.options[0] ? ' <span class="tag" style="--c: var(--violet)">your pick</span>' : "";
     return `<tr class="row-x ${open ? "open" : ""}" data-id="${sg.id}"><td class="pick"><input type="checkbox" value="${sg.id}" ${keep.has(String(sg.id)) ? "checked" : ""} aria-label="Select ${esc(sg.title)}"></td>
       <td>${esc(sg.title)} <span class="yr">${sg.year || ""}</span>${sg.mode === "upgrade" ? ' <span class="tag" style="--c: var(--cyan)">put right</span>' : ""}</td>
       <td class="nowrap">${fileLine(sg.before)}<div class="muted small">${short(sg.before)}</div></td>
-      <td>${best ? `<span class="nowrap">${fileLine(best)}</span><div class="muted small">${short(best)}</div>` : '<span class="muted">nothing qualified</span>'}</td>
+      <td>${best ? `<span class="nowrap">${fileLine(best)}${mine}</span><div class="muted small">${short(best)}</div>` : '<span class="muted">nothing qualified</span>'}</td>
       <td class="r nowrap">${best ? saveText(best.saving) : "–"}</td>
       <td class="r">${sg.options.length}</td><td class="muted small nowrap">${esc(sg.at)}</td></tr>`
       + (open ? `<tr class="detail" data-for="${sg.id}"><td colspan="7">${suggDetail(sg)}</td></tr>` : "");
@@ -830,11 +902,26 @@ function updateSgSel() {
   const picked = [...document.querySelectorAll("#sg-rows input:checked")].map((i) => +i.value), n = picked.length;
   const grabbable = sugg.filter((s) => picked.includes(s.id) && s.options.length).length;
   $("sg-again").disabled = $("sg-clear").disabled = !n;
-  $("sg-grab").disabled = !grabbable; $("sg-grab").textContent = grabbable ? `Grab ${grabbable} best pick${grabbable === 1 ? "" : "s"}` : "Grab best picks";
+  $("sg-grab").disabled = !grabbable; $("sg-grab").textContent = grabbable ? `Grab ${grabbable} pick${grabbable === 1 ? "" : "s"}` : "Grab picks";
+  const sel = sugg.filter((s) => picked.includes(s.id) && s.options.length);
+  let now = 0, after = 0, freed = 0, added = 0;
+  for (const s of sel) {
+    const b = (s.before.size || 0) / 1e9, a = pickOf(s).size / 1e9;
+    now += b; after += a;
+    if (a < b) freed += b - a; else added += a - b;
+  }
+  $("sg-est").hidden = !sel.length;
+  if (sel.length) $("sg-est").innerHTML = estLine(sel.length, now, after, freed, added, "from each film's pick", sel.length === 1 ? "film with a pick" : "films with a pick");
 }
 $("sg-rows").addEventListener("change", updateSgSel);
 $("sg-all").addEventListener("change", (e) => { document.querySelectorAll("#sg-rows input").forEach((i) => (i.checked = e.target.checked)); updateSgSel(); });
+$("sg-rows").addEventListener("keydown", (e) => {
+  const c = e.target.closest("[data-choose]");
+  if (c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); choosePick(+c.dataset.choose, c.dataset.guid); }
+});
 $("sg-rows").addEventListener("click", (e) => {
+  const c = e.target.closest("[data-choose]");
+  if (c && !e.target.closest("a, button")) { choosePick(+c.dataset.choose, c.dataset.guid); return; }
   const p = e.target.closest("[data-pick]");
   if (p) { p.disabled = true; act(async () => { const r = await api("POST", "/api/pick", { id: +p.dataset.pick, guid: p.dataset.guid }); setTimeout(() => loadSuggestions(), 4000); return r; }); return; }
   if (e.target.closest("input, a, button, label, .dd")) return;

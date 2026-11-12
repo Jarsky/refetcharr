@@ -693,7 +693,11 @@ class Engine:
             d = quality.describe_release(rel, mins, q)
             options.append({**d, "guid": rel["guid"], "indexerId": rel.get("indexerId"), "saving": m["movieFile"]["size"] - rel["size"]})
         sugg = self._load_json("suggestions.json", {})
+        was = sugg.get(str(mid)) or {}  # your pick survives a new search when the same release is offered again
+        old = next((o for o in was.get("options", []) if o["guid"] == was.get("chosen")), None)
+        again = next((o for o in options if old and (o["guid"] == old["guid"] or o.get("title") == old.get("title"))), None)
         sugg[str(mid)] = {"id": mid, "title": m["title"], "year": m.get("year"), "slug": m.get("titleSlug"), "at": time.strftime("%Y-%m-%d %H:%M"),
+                          "chosen": again["guid"] if again else (options[0]["guid"] if options else None),
                           "mode": mode, "flagged": self._flagged(m, s, mode, need), "before": before, "options": options,
                           "why": rules.explain(m, ranked[0], ranked, len(releases), r, q) if ranked else [],
                           "rejected": notes[:40], "releases": len(releases)}
@@ -719,8 +723,23 @@ class Engine:
         self.jobs.append(("pick", int(mid), guid))
         return "Grabbing it: it shows under Downloads in a moment."
 
+    def choose(self, mid: int, guid: str) -> str:
+        """Remember which of a film's suggestions to grab (Grab picks, and the film's own Grab)."""
+        sugg = self._load_json("suggestions.json", {})
+        sg = sugg.get(str(mid))
+        if not sg or not any(o["guid"] == guid for o in sg["options"]):
+            raise ValueError("That release isn't among the film's suggestions any more: find replacements again")
+        sg["chosen"] = guid
+        self._save_json("suggestions.json", sugg)
+        return "Picked."
+
+    @staticmethod
+    def chosen(sg: dict) -> dict | None:
+        """The option to grab: the one picked, else the best."""
+        return next((o for o in sg.get("options", []) if o["guid"] == sg.get("chosen")), None) or (sg.get("options") or [None])[0]
+
     def pick_best(self, ids: list) -> str:
-        """Grab the first (best) option of each film's suggestions."""
+        """Grab each film's picked option (the best one unless another was picked)."""
         sugg = self._load_json("suggestions.json", {})
         started, skipped = 0, []
         for i in ids:
@@ -729,11 +748,11 @@ class Engine:
                 skipped.append((sg or {}).get("title") or str(i))
                 continue
             try:
-                self.pick(int(i), sg["options"][0]["guid"])
+                self.pick(int(i), self.chosen(sg)["guid"])
                 started += 1
             except ValueError:
                 skipped.append(sg["title"])
-        msg = f"Grabbing the best pick for {started} film(s): they show under Downloads as each starts."
+        msg = f"Grabbing the picked release for {started} film(s): they show under Downloads as each starts."
         return msg + (f" Skipped {len(skipped)} with nothing to grab or already downloading." if skipped else "")
 
     def pick_now(self, mid: int, guid: str) -> None:

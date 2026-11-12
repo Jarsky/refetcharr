@@ -58,7 +58,10 @@ DEFAULTS = {
         "keep_atmos": True,  # an Atmos film's replacement must have Atmos (DD+ Atmos counts)
         "keep_lossless": False,  # a film with lossless audio (TrueHD, DTS-HD MA, FLAC) must keep it
         "min_picture": "medium",  # the least picture quality for a replacement (Settings → Quality): off, low, medium, high
-        "prefer": "high",  # pick the smallest release rated HIGH (else the best MEDIUM), or "size": the size nearest Preferred
+        # which qualifying release to pick: "high" the smallest rated HIGH (else the best MEDIUM), "small" the smallest
+        # that qualifies at all (Max savings), or "size" the size nearest Preferred
+        "prefer": "high",
+        "audio_before_size": False,  # among HIGH releases, your audio codec order beats size (Max quality)
         "stall_warn_hours": 2,  # warn when a download has made no progress for this long (0 = never)
     },
     "ignore": {
@@ -79,6 +82,36 @@ DEFAULTS = {
     # the one sign-in (refetcharr.auth): never sent to the browser except the username
     "auth": {"username": "", "password_hash": "", "secret": "", "api_key": "", "epoch": 0},
 }
+
+# Replacement profiles (1.7.0): one click sets these rules; any other value of them shows as Custom. Balanced is the
+# defaults. Sizes are MB/min, as in Settings → Replacement; the caps, floors and everything else stay as you set them.
+PROFILES = {
+    "savings": {
+        "label": "Max savings",
+        "blurb": "The smallest file that still looks good: MEDIUM picture is enough, Atmos isn't kept, smaller targets.",
+        "rules": {"prefer": "small", "min_picture": "medium", "audio_before_size": False, "keep_atmos": False,
+                  "keep_lossless": False, "preferred_1080": 45, "preferred_2160": 110, "max_ratio": 0.6},
+    },
+    "balanced": {
+        "label": "Balanced",
+        "blurb": "HIGH picture at the smallest size (else the best MEDIUM), keeping Atmos. Your audio order only decides "
+                 "between releases of about the same size.",
+        "rules": {"prefer": "high", "min_picture": "medium", "audio_before_size": False, "keep_atmos": True,
+                  "keep_lossless": False, "preferred_1080": 60, "preferred_2160": 150, "max_ratio": 0.7},
+    },
+    "quality": {
+        "label": "Max quality",
+        "blurb": "HIGH picture only, keeping Atmos and lossless audio, with your audio order ahead of size and roomier targets.",
+        "rules": {"prefer": "high", "min_picture": "high", "audio_before_size": True, "keep_atmos": True,
+                  "keep_lossless": True, "preferred_1080": 80, "preferred_2160": 180, "max_ratio": 0.85},
+    },
+}
+
+
+def profile_of(r: dict) -> str:
+    """The profile whose rules all match `r`, else "custom"."""
+    return next((k for k, p in PROFILES.items() if all(r.get(x) == v for x, v in p["rules"].items())), "custom")
+
 
 _lock = threading.Lock()
 

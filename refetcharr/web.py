@@ -317,6 +317,34 @@ def dismiss(body: IdsIn):
     return {"message": engine.dismiss(body.ids)}
 
 
+@app.post("/api/suggestions/choose")
+def choose(body: PickIn):
+    try:
+        return {"message": engine.choose(body.id, body.guid)}
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+
+
+@app.get("/api/profiles")
+def profiles():
+    """The replacement profiles, and which one the saved rules match ("custom": none)."""
+    return {"current": config.profile_of(config.load()["rules"]),
+            "profiles": [{"id": k, **v} for k, v in config.PROFILES.items()]}
+
+
+class ProfileIn(BaseModel):
+    id: str
+
+
+@app.post("/api/profile")
+def set_profile(body: ProfileIn):
+    p = config.PROFILES.get(body.id)
+    if not p:
+        raise HTTPException(400, f"There's no profile called {body.id}")
+    config.save({"rules": p["rules"]})
+    return {"message": f"{p['label']} profile on: new searches use it now; the estimates follow straight away.", "current": body.id}
+
+
 @app.post("/api/pick/best")
 def pick_best(body: IdsIn):
     return {"message": engine.pick_best(body.ids)}

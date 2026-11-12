@@ -22,7 +22,7 @@ GROUPS = {
 SHRINKABLE = ("remux", "big4k", "remux4k", "big1080")
 GROWABLE = ("tiny",)
 UPGRADE = ("lowq",)  # judged on getting better, not on size (and films queued again by hand: mode="upgrade")
-PREFER = ("high", "size")  # rank by: the smallest HIGH release (else the best MEDIUM), or the size nearest Preferred
+PREFER = ("high", "small", "size")  # the smallest HIGH (else the best MEDIUM); the smallest that qualifies; nearest Preferred
 GROW_MIN = 1.1  # a replacement for a tiny file must be at least this much bigger to be worth the download
 # Among HIGH releases, sizes within this share of the smallest count as the same size: only then do your audio codec
 # preferences decide. Without it a lossless-audio release won however much bigger it was (1.6.3: top picks 4 GB bigger
@@ -280,7 +280,10 @@ def explain(m: dict, chosen: dict, ok: list, total: int, r: dict, q: dict | None
     sc = chosen.get("customFormatScore") or 0
     if any((x.get("customFormatScore") or 0) < sc for x in others):
         out.append(f"Radarr format score {sc}")
-    if r.get("prefer", "high") == "high":
+    if r.get("prefer") == "small":
+        d = quality.describe_release(chosen, mins, q)
+        out.append(f"the smallest release that qualifies ({chosen['size'] / 1e9:.1f} GB, picture {d['video_tier'] or '?'})")
+    elif r.get("prefer", "high") == "high":
         d = quality.describe_release(chosen, mins, q)
         if d["video_tier"] == "HIGH":
             out.append(f"the smallest release rated HIGH ({chosen['size'] / 1e9:.1f} GB, picture {d['picture_mbps']:g} Mbps in x265 terms)")
@@ -333,6 +336,9 @@ def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | 
                 order = (codecs[1], band, size) if r.get("audio_before_size") else (band, codecs[1], size)
                 return (*top, codecs[0], *order, *tail)
             return (*top, *codecs, round(-d["picture_mbps"], 1), *tail)  # below HIGH: the best picture
+        if r.get("prefer") == "small":  # Max savings: the smallest that qualifies, your audio order between equals
+            return (-res if r["prefer_higher_res"] else 0, codecs[0], round(rel["size"] / 1e9, 1), codecs[1],
+                    -(rel.get("customFormatScore") or 0), -(rel.get("seeders") or 0))
         pref = preferred(res, r)
         return (-res if r["prefer_higher_res"] else 0, *codecs, -(rel.get("customFormatScore") or 0),
                 round(abs(rel["size"] / 1e6 / mins - pref) / pref, 1), -(rel.get("seeders") or 0))
