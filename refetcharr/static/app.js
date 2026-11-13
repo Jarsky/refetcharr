@@ -154,7 +154,8 @@ async function refresh() {
   $("s-replaced").textContent = c.replaced || 0;
   $("s-active").textContent = `${s.active.length - s.stalled}/${s.limits.max_active}`;
   const warned = [s.stalled ? `${s.stalled} stalled` : "", s.stuck ? `${s.stuck} waiting on qBittorrent` : ""].filter(Boolean).join(", ");
-  $("s-active-label").textContent = warned ? `downloading · ${warned}` : "downloading";
+  const tvDl = s.active.filter(isTv).length;
+  $("s-active-label").textContent = ["downloading", s.tv && tvDl ? `${s.active.length - tvDl} films, ${tvDl} TV` : "", warned].filter(Boolean).join(" · ");
   $("stat-active").classList.toggle("warned", !!warned);
   $("s-today").textContent = `${s.today}/${s.limits.max_per_day || "∞"}`;
   $("s-failed").textContent = s.failed.length;
@@ -177,21 +178,23 @@ async function refresh() {
   $("error").innerHTML = problem ? `<span>Problem: ${esc(problem)}${fixAt ? ` · <a href="#${fixAt}">Open Settings → ${fixAt === "sonarr" ? "Sonarr" : "Radarr"}</a>` : ""}</span>
     <button type="button" class="x" id="error-x" aria-label="Dismiss">✕</button>` : "";
 
-  $("active").innerHTML = s.active.length ? s.active.sort((a, b) => (b.stalled - a.stalled) || (b.finish_warn - a.finish_warn) || (b.progress ?? -1) - (a.progress ?? -1)).map((a) => {
-    const ready = ["importPending", "importBlocked"].includes(a.state), pct = a.progress ?? 0;
-    const importing = a.status === "importing" || a.state === "importing";
-    const mins = a.finishing_minutes ?? 0, waited = mins >= 120 ? `${Math.round(mins / 60)} h` : `${mins} min`;
-    const label = a.stalled ? `Stalled: no progress for ${Math.round(a.stalled_hours ?? 0)} h, at ${pct}%` : a.finishing ? `Downloaded ${waited} ago, waiting for qBittorrent to complete it` : importing ? "Importing" : ready ? "Ready to import" : a.progress === null ? "Waiting for Radarr" : `${pct}%`;
-    const open = expanded.has(`active:${a.id}`);
-    return `<div class="dl row-x ${open ? "open" : ""} ${a.stalled || a.finish_warn ? "stalled" : ""}" data-id="${a.id}"><span class="t">${esc(a.title)} <span class="yr">${a.year || ""}</span>${a.stalled ? ` <span class="tag warnbg">Not using a slot</span>` : ""}</span>
-      <span class="sz">${size(a.old_size)} → ${size(a.new_size)}</span>
-      <div class="bar ${ready || importing ? "ready" : ""}"><i style="width:${ready || importing ? 100 : pct}%"></i></div>
-      <div class="meta"><span>${label}</span><span>${esc(a.message || a.timeleft || "")}</span></div></div>`
-      + (open ? `<div class="dl-detail" data-for="${a.id}">${detailCache.get(+a.id) || LOADING}</div>` : "");
-  }).join("") : `<p class="empty">Nothing downloading.</p>`;
-
-  $("activity").innerHTML = s.activity.map((x) => `<li><time>${esc(x.time.slice(5, 16))}</time><span class="${esc(x.kind)}">${esc(x.text)}</span></li>`).join("")
-    || `<li class="empty">Nothing yet.</li>`;
+  // 1.9.1: films and TV in their own bands, each with its downloads and its activity (app-wide entries in both, dimmed)
+  const bands = !!s.tv;
+  document.querySelectorAll("[data-band]").forEach((h) => (h.hidden = !bands));
+  $("tv-band").hidden = !bands;
+  $("tab-dashboard").classList.toggle("banded", bands);
+  const films = bands ? s.active.filter((a) => !isTv(a)) : s.active, tvs = s.active.filter(isTv);
+  renderDownloads("active", films, bands ? "No films downloading." : "Nothing downloading.");
+  const feed = (box, want) => {
+    const rows = s.activity.filter((x) => !bands || !x.item || x.item === want).slice(0, 40);
+    $(box).innerHTML = rows.map((x) => `<li class="${bands && !x.item ? "general" : ""}"><time>${esc(x.time.slice(5, 16))}</time><span class="${esc(x.kind)}">${esc(x.text)}</span></li>`).join("")
+      || `<li class="empty">Nothing yet.</li>`;
+  };
+  feed("activity", "film");
+  if (bands) { renderDownloads("active-tv", tvs, "No TV downloading."); feed("activity-tv", "tv"); }
+  const stalledOf = (xs) => xs.filter((a) => a.stalled).length;
+  const countText = (xs) => (xs.length ? `· ${xs.length - stalledOf(xs)} downloading${stalledOf(xs) ? `, ${stalledOf(xs)} stalled` : ""}` : "");
+  $("active-tv-count").textContent = countText(tvs);
 
   const sum = s.scan.summary || {};
   $("scan-at").textContent = s.scan.at ? `· ${s.scan.at.replace("T", " ")}` : "· not scanned yet";
@@ -204,11 +207,28 @@ async function refresh() {
     + (s.tv && !s.tv_scanned ? `<p class="muted small groups-h">TV shows here after the next rescan.</p>` : "")
     || `<p class="empty">Run a scan to see the library's oversized films${s.tv ? " and seasons" : ""}.</p>`;
 
-  $("active-count").textContent = s.active.length ? `· ${s.active.length - s.stalled} of ${s.limits.max_active} at once${s.stalled ? `, ${s.stalled} stalled` : ""}` : "";
+  $("active-count").textContent = bands ? countText(films) + (s.active.length ? ` · ${s.active.length - s.stalled} of ${s.limits.max_active} at once, films and TV` : "")
+    : s.active.length ? `· ${s.active.length - s.stalled} of ${s.limits.max_active} at once${s.stalled ? `, ${s.stalled} stalled` : ""}` : "";
   paintKinds();
   renderFailed(); loadReplaced(); if (currentTab() === "suggestions") loadSuggestions(true);
   const tab = currentTab();
   if (tab === "failed" || tab === "replaced" || tab === "library") markSeen(tab); else badges();
+}
+
+function renderDownloads(box, list, empty) {
+  $(box).innerHTML = list.length ? list.sort((a, b) => (b.stalled - a.stalled) || (b.finish_warn - a.finish_warn) || (b.progress ?? -1) - (a.progress ?? -1)).map((a) => {
+    const ready = ["importPending", "importBlocked"].includes(a.state), pct = a.progress ?? 0;
+    const importing = a.status === "importing" || a.state === "importing";
+    const mins = a.finishing_minutes ?? 0, waited = mins >= 120 ? `${Math.round(mins / 60)} h` : `${mins} min`;
+    const app = isTv(a) ? "Sonarr" : "Radarr";
+    const label = a.stalled ? `Stalled: no progress for ${Math.round(a.stalled_hours ?? 0)} h, at ${pct}%` : a.finishing ? `Downloaded ${waited} ago, waiting for qBittorrent to complete it` : importing ? "Importing" : ready ? "Ready to import" : a.progress === null ? `Waiting for ${app}` : `${pct}%`;
+    const open = expanded.has(`${box}:${a.id}`);
+    return `<div class="dl row-x ${open ? "open" : ""} ${a.stalled || a.finish_warn ? "stalled" : ""}" data-id="${a.id}"><span class="t">${esc(a.title)} <span class="yr">${a.year || ""}</span>${a.stalled ? ` <span class="tag warnbg">Not using a slot</span>` : ""}</span>
+      <span class="sz">${size(a.old_size)} → ${size(a.new_size)}</span>
+      <div class="bar ${ready || importing ? "ready" : ""}"><i style="width:${ready || importing ? 100 : pct}%"></i></div>
+      <div class="meta"><span>${label}</span><span>${esc(a.message || a.timeleft || "")}</span></div></div>`
+      + (open ? `<div class="dl-detail" data-for="${a.id}">${detailCache.get(+a.id) || LOADING}</div>` : "");
+  }).join("") : `<p class="empty">${empty}</p>`;
 }
 
 function renderFailed() {
@@ -845,7 +865,7 @@ function toggleDetail(box, el) {
     ? `<tr class="detail" data-for="${id}"><td colspan="${$(box).dataset.cols || 6}">${LOADING}</td></tr>` : `<div class="dl-detail" data-for="${id}">${LOADING}</div>`);
   loadDetail(id);   // always fresh when opened; re-renders reuse it while open
 }
-for (const box of ["lib-rows", "fail-rows", "done-rows", "active"]) {
+for (const box of ["lib-rows", "fail-rows", "done-rows", "active", "active-tv"]) {
   $(box).addEventListener("click", (e) => {
     if (e.target.closest("input, a, button, label, .dd")) return;
     const el = e.target.closest(".row-x"); if (el) toggleDetail(box, el);
@@ -942,12 +962,14 @@ async function loadEvents() {
 }
 function renderEvents() {
   const q = $("ev-q").value.trim().toLowerCase();
-  const v = events.filter((x) => evKinds.has(x.kind) && (!q || x.text.toLowerCase().includes(q)));
+  const item = $("ev-item").value;
+  const v = events.filter((x) => evKinds.has(x.kind) && (!item || x.item === item) && (!q || x.text.toLowerCase().includes(q)));
   $("ev-rows").innerHTML = v.slice(0, 1000).map((x) => `<tr><td>${esc(x.time)}</td><td><span class="kind ${esc(x.kind)}">${esc(x.kind)}</span></td><td>${esc(x.text)}</td></tr>`).join("")
     || `<tr><td colspan="3" class="empty">Nothing matches.</td></tr>`;
   $("ev-count").textContent = `${v.length.toLocaleString()} of ${events.length.toLocaleString()}`;
 }
 $("ev-q").addEventListener("input", renderEvents);
+$("ev-item").addEventListener("change", renderEvents);
 $("ev-kinds").addEventListener("click", (e) => {
   const b = e.target.closest(".chip"); if (!b) return;
   evKinds.has(b.dataset.k) ? evKinds.delete(b.dataset.k) : evKinds.add(b.dataset.k);

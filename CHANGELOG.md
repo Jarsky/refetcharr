@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.1 (2026-11-13)
+
+- **Films and TV apart on the dashboard**: with Sonarr connected, the dashboard has a Films band and a TV band, each
+  with its own downloads and recent activity (scans and other app-wide entries show in both, dimmed). The downloading
+  tile says how many are films and how many TV, and Events can be filtered to films or TV.
+- A TV download Sonarr hasn't listed yet says "Waiting for Sonarr", not "Waiting for Radarr".
+- Every activity entry about a film, season or episode now records which, so the split is exact (older entries go by
+  their title).
+
 ## 1.9.0 (2026-11-13)
 
 - **TV, through Sonarr**: connect Sonarr under Settings → Sonarr (or `SONARR_API_KEY` in `.env`) and TV seasons are

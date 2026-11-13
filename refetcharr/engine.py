@@ -33,6 +33,22 @@ def wait(name: str) -> float:
     return v * 3600 if name.endswith("_hours") else v * 60
 
 
+_TV_TITLE = re.compile(r" · (Season \d+|S\d+E\d+)")
+
+
+def activity_kind(x: dict) -> str:
+    """Whether an activity entry is about a film or TV ("" for the app itself: scans, starts, settings). Entries without an
+    item id (older ones) go by the title: TV titles read "Show · Season 2" or "Show · S02E03"."""
+    if x.get("id") is not None:
+        try:
+            return "tv" if ids.is_tv(x["id"]) else "film"
+        except (TypeError, ValueError):
+            return ""
+    if x.get("kind") in ("start", "error", "setup", "scan") and not _TV_TITLE.search(x.get("text") or ""):
+        return ""
+    return "tv" if _TV_TITLE.search(x.get("text") or "") else "film" if x.get("kind") in ("grab", "done", "import", "fail", "skip", "warn", "retry") else ""
+
+
 def flag_reason(m: dict, r: dict, q: dict | None = None) -> str:
     """Why a film is in its group, in words, with the numbers."""
     g = rules.group(m, r, q)
@@ -137,7 +153,7 @@ class Engine:
                 and (not ids or int(mid) in {int(i) for i in ids}) and (not match or match.lower() in s["title"].lower())]
         gone = store.remove(pick)
         for s in gone:
-            store.log("retry", f"{s['title']} ({s.get('year')}) will be tried again (was {s['status']})")
+            store.log("retry", f"{s['title']} ({s.get('year')}) will be tried again (was {s['status']})", id=int(s["id"]))
         return {"retried": [{"id": s["id"], "title": s["title"], "was": s["status"]} for s in gone]}
 
     # ── state for the dashboard ─────────────────────────────────────────────
@@ -190,7 +206,7 @@ class Engine:
                          for mid, e in replaced[:100]],
             "scan": {"at": self.scan_at, "summary": self.scan_summary},
             "tv_scanned": "tv" in self.scan_summary,
-            "activity": store.recent(40),
+            "activity": [dict(x, item=activity_kind(x)) for x in store.recent(80)],
         }
 
     def films(self) -> list:
@@ -427,7 +443,7 @@ class Engine:
         store.update(m["id"], **base, new_size=f["size"], status="no release",
                      problem=(notes[0] if notes else f"no {what}s found")[:200], decision=dict(decision, rejected=notes[:40]))
         store.log("skip", f"{label}: no {what} qualifies ({len(notes)} found)" if not refused
-                  else f"{label}: {len(refused)} grab(s) refused by {arr.app(m['id']).title()}")
+                  else f"{label}: {len(refused)} grab(s) refused by {arr.app(m['id']).title()}", id=m["id"])
         if ids.kind(m["id"]) == "season" and s["tv"].get("episode_fallback"):
             self._fall_back(m, base, by_hand)
 
@@ -518,7 +534,7 @@ class Engine:
             if e["status"] == "missing from queue" or e.get("missing_since"):  # it was only briefly out of the queue
                 store.update(mid, status="downloading", missing_since="", problem="")
                 if e["status"] == "missing from queue":
-                    store.log("queue", f"{e['title']}: back in {arr.app(mid).title()}'s queue, carrying on")
+                    store.log("queue", f"{e['title']}: back in {arr.app(mid).title()}'s queue, carrying on", id=int(mid))
             if x.get("status") != "completed":
                 if e["status"] != "downloading":
                     store.update(mid, status="downloading")
@@ -543,7 +559,7 @@ class Engine:
                     store.update(mid, no_video_since=since)
                 if (self._hours_since(since) or 0) * 3600 >= wait("no_video_hours") and e["status"] != "nothing to import":
                     store.update(mid, status="nothing to import", problem="the download has no video file")
-                    store.log("fail", f"{e['title']}: the download has no video file; the original stays")
+                    store.log("fail", f"{e['title']}: the download has no video file; the original stays", id=int(mid))
                 continue
             problem = None
             for v in vids:  # every file of a season pack is checked: one bad episode keeps the whole season as it was
@@ -554,12 +570,12 @@ class Engine:
                     break
             if problem:
                 store.update(mid, status="kept original", problem=problem)
-                store.log("fail", f"{e['title']}: not imported, {problem}. The original stays; the download is left in qBittorrent.")
+                store.log("fail", f"{e['title']}: not imported, {problem}. The original stays; the download is left in qBittorrent.", id=int(mid))
                 continue
             arr.manual_import(vids, int(mid), x["downloadId"], m)
             store.update(mid, status="importing", checked=True, problem="", no_video_since="",
                          import_asked=dt.datetime.now().isoformat(timespec="seconds"))
-            store.log("import", f"{e['title']}: importing " + (os.path.basename(vids[0]["path"]) if len(vids) == 1 else f"{len(vids)} episodes"))
+            store.log("import", f"{e['title']}: importing " + (os.path.basename(vids[0]["path"]) if len(vids) == 1 else f"{len(vids)} episodes"), id=int(mid))
         time.sleep(10)
         for mid, e in store.load().items():
             if e["status"] == "importing":
@@ -608,7 +624,7 @@ class Engine:
                 why = x.get("errorMessage") or "no progress"
                 store.log("warn", f"{e['title']}: no progress for {hours:.0f} hours ({why})", id=int(mid))
             else:
-                store.log("queue", f"{e['title']}: moving again")
+                store.log("queue", f"{e['title']}: moving again", id=int(mid))
         if left <= 0 and hours is not None and hours * 3600 >= wait("finish_warn_minutes") and not e.get("finish_warned"):
             fields["finish_warned"] = True
             store.log("warn", f"{e['title']}: fully downloaded {hours:.0f} h ago, but qBittorrent hasn't completed it, so it can't import yet", id=int(mid))
@@ -696,7 +712,7 @@ class Engine:
             who = arr.app(mid).title()
             store.update(mid, status="missing from queue", problem=f"the download left {who}'s queue without being imported")
             store.log("fail", f"{e['title']}: the download left {who}'s queue without being imported; the original stays "
-                              "(if it comes back, Refetcharr carries on by itself)")
+                              "(if it comes back, Refetcharr carries on by itself)", id=int(mid))
 
     # ── one film changed (Radarr's import webhook) ──────────────────────────
     def refresh_film(self, mid: int, why: str = "") -> None:

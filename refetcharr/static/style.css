@@ -458,3 +458,13 @@ select { background: var(--panel2); color: var(--fg); border: 1px solid var(--li
 .seg.kind[hidden] { display: none; }
 .groups-h { grid-column: 1 / -1; margin: 6px 0 0; font-size: 13px; }
 details.note summary { cursor: pointer; }
+
+/* 1.9.1: films and TV bands on the dashboard */
+.band-h { display: flex; align-items: center; gap: 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
+.band-h[hidden] { display: none; }
+.band-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--violet); }
+.band-dot.tv { background: var(--cyan); }
+.band-tv { border-top: 2px solid color-mix(in oklab, var(--cyan) 60%, transparent); }
+.feed li.general { opacity: .55; }
+#tv-band[hidden] { display: none; }
+.banded .card.fill { height: clamp(240px, 36vh, 400px); }  /* two bands: both fit on a screen */

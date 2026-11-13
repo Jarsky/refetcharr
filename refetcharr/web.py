@@ -307,7 +307,8 @@ def films():
 def activity(n: int = 500):
     """The activity log, newest first (Activity → Events)."""
     from . import store
-    return {"events": store.history(max(1, min(n, 20000)))}
+    from .engine import activity_kind
+    return {"events": [dict(x, item=activity_kind(x)) for x in store.history(max(1, min(n, 20000)))]}
 
 
 @app.get("/api/replaced")

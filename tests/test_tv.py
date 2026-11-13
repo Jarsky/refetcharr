@@ -372,3 +372,22 @@ def test_sonarr_setup_checks_sizes_in_its_profiles_and_adds_its_webhook(monkeypa
     assert hook["onEpisodeFileDelete"] and hook["onDownload"] and not hook["onGrab"] and "/api/webhook/sonarr?apikey=" in hook["fields"][0]["value"]
     assert any("Sonarr webhook" in d for d in done)
     assert {c["id"] for c in setup.checks(items, "sonarr") if not c["ok"]} == set()
+
+
+def test_activity_says_whether_it_is_about_a_film_or_tv():
+    from refetcharr.engine import activity_kind
+    assert activity_kind({"kind": "grab", "text": "Film: grabbed", "id": 12}) == "film"
+    assert activity_kind({"kind": "grab", "text": "Show · Season 1: grabbed", "id": SEASON1}) == "tv"
+    assert activity_kind({"kind": "import", "text": "Show · S01E02: importing x.mkv"}) == "tv"  # older entries: by the title
+    assert activity_kind({"kind": "done", "text": "Leap Year: replaced, 5.9 GB bigger"}) == "film"
+    assert activity_kind({"kind": "scan", "text": "Scanned 4876 films: 1610 flagged. TV: 2425 seasons"}) == ""
+    assert activity_kind({"kind": "start", "text": "Refetcharr 1.9.1 started"}) == ""
+
+
+def test_the_dashboard_tags_activity_and_downloads(tv):
+    e = tv()
+    e.queue_now(ids=[SEASON1])
+    e.refill(config.load())
+    st = e.status()
+    assert st["tv"] and st["active"][0]["kind"] == "season"
+    assert any(x["item"] == "tv" and x["kind"] == "grab" for x in st["activity"])  # the entry's own kind is kept

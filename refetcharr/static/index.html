@@ -90,6 +90,7 @@
         <button type="button" id="queue-clear" class="btn ghost">Clear waiting</button>
       </form>
     </div>
+    <h2 class="band-h" data-band hidden><span class="band-dot film"></span>Films</h2>
     <div class="grid2 even">
       <div class="card fill">
         <h2>Downloads <span id="active-count" class="muted small"></span></h2>
@@ -98,6 +99,17 @@
       <div class="card fill">
         <h2>Recent activity <a href="#events" class="muted small more-link">all events</a></h2>
         <ul id="activity" class="feed scroll"></ul>
+      </div>
+    </div>
+    <h2 class="band-h" data-band hidden><span class="band-dot tv"></span>TV</h2>
+    <div class="grid2 even" id="tv-band" hidden>
+      <div class="card fill band-tv">
+        <h2>Downloads <span id="active-tv-count" class="muted small"></span></h2>
+        <div id="active-tv" class="scroll"></div>
+      </div>
+      <div class="card fill band-tv">
+        <h2>Recent activity <a href="#events" class="muted small more-link">all events</a></h2>
+        <ul id="activity-tv" class="feed scroll"></ul>
       </div>
     </div>
     <div class="card">
@@ -220,6 +232,7 @@
     <div class="card">
       <div class="toolbar">
         <input id="ev-q" type="search" placeholder="Find…" aria-label="Find in events">
+        <select id="ev-item" aria-label="Films or TV"><option value="">Films and TV</option><option value="film">Films</option><option value="tv">TV</option></select>
         <div id="ev-kinds" class="chips" role="group" aria-label="Kinds"></div>
         <span id="ev-count" class="muted small"></span>
       </div>
