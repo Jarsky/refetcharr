@@ -391,3 +391,92 @@ def test_the_dashboard_tags_activity_and_downloads(tv):
     st = e.status()
     assert st["tv"] and st["active"][0]["kind"] == "season"
     assert any(x["item"] == "tv" and x["kind"] == "grab" for x in st["activity"])  # the entry's own kind is kept
+
+
+# ── 1.10.0: films and TV run their own queues ─────────────────────────────
+@pytest.fixture
+def both(tv, monkeypatch):
+    """Films from a fake Radarr and seasons from a fake Sonarr in one engine."""
+    from test_refetcharr import FakeRadarr, film
+    from refetcharr import engine as E
+
+    def make(n_films=4, seasons=3):
+        ser = show(tuple((i, 10) for i in range(1, seasons + 1)))
+        files = [ep_file(s * 100 + i, i, season=s) for s in range(1, seasons + 1) for i in range(1, 11)]
+        e = tv(ser, files, packs=[pack(40.5, f"Show S0{s} 2160p WEB-DL DDP5.1 x265-GRP", season=s) for s in range(1, seasons + 1)])
+        fr = FakeRadarr([film(i, f"F{i}", gb=40 - i) for i in range(1, n_films + 1)])
+        for name in ("movies", "movie", "releases", "grab", "queue", "manual_import_items", "manual_import"):
+            monkeypatch.setattr(E.radarr, name, getattr(fr, name))
+        e.fake.season_releases = lambda sid, n: [x for x in e.fake.packs if x["seasonNumber"] == n] + e.fake.singles
+        monkeypatch.setattr(arr.sonarr, "season_releases", e.fake.season_releases)
+        config.save({"connections": {"radarr_api_key": "r"}})
+        e.films_fake = fr
+        return e
+    return make
+
+
+def kinds_grabbed(e):
+    return sorted(config.kind_of(k) for k, v in store.load().items() if v.get("new_title"))
+
+
+def test_films_and_tv_have_their_own_slots_and_take_turns(both):
+    e = both()
+    config.save({"queue": {"auto": True, "max_active": 2}, "tv": {"auto": True, "max_active": 1}})
+    for _ in range(10):
+        e.refill(config.load())
+    assert kinds_grabbed(e) == ["films", "films", "tv"]  # 2 film slots, 1 TV slot, each kept apart
+    st = e.status()["kinds"]
+    assert st["films"]["active"] == 2 and st["tv"]["active"] == 1 and st["tv"]["max_active"] == 1
+
+
+def test_pausing_tv_holds_only_tv(both):
+    e = both()
+    config.save({"tv": {"paused": True}})
+    e.queue_now(ids=[SEASON1, 1])
+    for _ in range(4):
+        e.refill(config.load())
+    assert kinds_grabbed(e) == ["films"] and list(e.manual_ids) == [SEASON1]  # the season waits for TV to resume
+    config.save({"tv": {"paused": False}})
+    e.refill(config.load())
+    e.refill(config.load())
+    assert kinds_grabbed(e) == ["films", "tv"]
+
+
+def test_queue_the_biggest_wins_of_one_kind(both):
+    e = both()
+    assert "seasons" in e.queue_now(count=2, kind="tv")
+    for _ in range(6):
+        e.refill(config.load())
+    assert kinds_grabbed(e) == ["tv", "tv"] and e.manual_count_tv == 0 and e.manual_count == 0
+
+
+def test_each_kind_has_its_own_daily_limit_and_schedule(both):
+    e = both()
+    config.save({"queue": {"auto": True, "max_per_day": 1},
+                 "tv": {"auto": True, "max_active": 5, "window": {"enabled": True, "days": [], "start": "01:00", "end": "02:00"}}})
+    for _ in range(6):
+        e.refill(config.load())
+    assert kinds_grabbed(e) == ["films"]  # films: one a day; TV: outside its schedule
+    assert store.grabbed_on(dt.date.today(), "films") == 1 and store.grabbed_on(dt.date.today(), "tv") == 0
+    assert e.status()["kinds"]["tv"]["in_window"] is False
+
+
+def test_pause_resume_and_queue_by_kind_over_the_api(both, monkeypatch):
+    from refetcharr import web
+    from test_refetcharr import keyed
+    e = both()
+    monkeypatch.setattr(web, "engine", e)
+    monkeypatch.setenv("REFETCHARR_WORKER", "0")
+    c = keyed(web)
+    assert "TV Paused" in c.post("/api/pause", json={"kind": "tv"}).json()["message"]
+    s = config.load()
+    assert s["tv"]["paused"] and not s["queue"]["paused"]
+    c.post("/api/pause")  # no kind (the TUI and CLI): both
+    assert config.load()["queue"]["paused"] and config.load()["tv"]["paused"]
+    c.post("/api/resume", json={"kind": "films"})
+    assert not config.load()["queue"]["paused"] and config.load()["tv"]["paused"]
+    assert "TV paused" in c.post("/api/queue", json={"count": 3, "kind": "tv"}).json()["message"]
+    assert c.post("/api/queue", json={"count": 3, "kind": "radio"}).status_code == 422
+    assert c.patch("/api/settings", json={"tv": {"max_active": 0}}).status_code == 400
+    assert c.patch("/api/settings", json={"tv": {"window": {"start": "25:00"}}}).status_code == 400
+    assert c.post("/api/queue/clear", json={"kind": "tv"}).status_code == 200 and e.manual_count_tv == 0

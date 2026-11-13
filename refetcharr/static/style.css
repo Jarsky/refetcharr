@@ -468,3 +468,28 @@ details.note summary { cursor: pointer; }
 .feed li.general { opacity: .55; }
 #tv-band[hidden] { display: none; }
 .banded .card.fill { height: clamp(240px, 36vh, 400px); }  /* two bands: both fit on a screen */
+
+/* 1.10.0: each kind's queue controls in the top bar, the Queue page's two columns */
+.actions { flex-wrap: wrap; align-items: center; }
+.qctl { display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel2); }
+.qctl[hidden] { display: none; }
+.qctl-name { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.qctl:not(:has(.qctl-name)) { padding-left: 4px; }
+.top .seg.kind { margin-left: 12px; }
+.qcol h2 { display: flex; align-items: center; gap: 8px; }
+.qcol[hidden] { display: none; }
+
+/* 1.10.0: the info button and its balloon, in place of explanations that crowded the pages */
+.tip { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 2px 0 6px; padding: 0; vertical-align: 1px; border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--muted) 60%, transparent); background: transparent; color: var(--muted);
+  font: 700 10px/1 var(--mono, monospace); font-style: normal; cursor: help; flex: none; text-transform: none; letter-spacing: 0; }
+.tip:hover, .tip:focus-visible, .tip[aria-expanded=true] { color: var(--fg); border-color: var(--cyan); outline: none; background: color-mix(in oklab, var(--cyan) 18%, transparent); }
+.balloon { position: fixed; z-index: 1000; max-width: min(340px, calc(100vw - 24px)); padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.45;
+  font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--fg); background: var(--panel2); border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); pointer-events: none; }
+.balloon[hidden] { display: none; }
+.toolbar-lead { font-weight: 600; display: inline-flex; align-items: center; }
+.fields label .lbl { display: inline-flex; align-items: center; }
+.stat .split { display: flex; align-items: center; gap: 5px; margin-top: 3px; font-size: 11px; opacity: .85; text-transform: none; letter-spacing: 0; }
+.stat .split .band-dot { width: 7px; height: 7px; }
+.stat .split .band-dot.tv { margin-left: 8px; }

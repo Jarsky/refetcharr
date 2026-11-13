@@ -64,10 +64,12 @@ def freed(entry: dict) -> int:
     return own + (freed(prev) if prev and prev.get("status") == "replaced" else 0)
 
 
-def grabbed_on(day: dt.date) -> int:
-    """Films actually grabbed that day (searches that found nothing don't count against the daily limit)."""
+def grabbed_on(day: dt.date, kind: str = "") -> int:
+    """Films (or with `kind`, just "films" or "tv") actually grabbed that day (searches that found nothing don't count
+    against the daily limit)."""
     stamp = day.isoformat()
-    return sum(1 for s in load().values() if s.get("grabbed", "").startswith(stamp) and s.get("new_title"))
+    return sum(1 for mid, s in load().items() if s.get("grabbed", "").startswith(stamp) and s.get("new_title")
+               and (not kind or config.kind_of(mid) == kind))
 
 
 def _load_log() -> None:

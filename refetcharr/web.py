@@ -57,6 +57,11 @@ async def _revalidate_page(request, call_next):
 class QueueIn(BaseModel):
     count: int = Field(0, ge=0, le=500)
     ids: list[int] = Field(default_factory=list, max_length=500)
+    kind: str = Field("films", pattern="^(films|tv)$")  # what `count` counts: films or TV seasons
+
+
+class KindIn(BaseModel):
+    kind: str = Field("all", pattern="^(all|films|tv)$")
 
 
 class ConnectionsIn(BaseModel):
@@ -163,14 +168,30 @@ def _check_quality(q: dict) -> None:
 
 def _check_tv(tv: dict) -> None:
     """TV's own settings: its switches, groups, rules and quality."""
-    for k in ("enabled", "auto", "episode_fallback"):
+    for k in ("enabled", "auto", "paused", "episode_fallback"):
         if k in tv and not isinstance(tv[k], bool):
             raise HTTPException(400, f"tv.{k} must be on or off")
+    _check_queue(tv, "TV ")
     for k, v in (tv.get("groups") or {}).items():
         if k not in config.DEFAULTS["tv"]["groups"] or not isinstance(v, bool):
             raise HTTPException(400, f"TV group {k} must be one of {', '.join(config.DEFAULTS['tv']['groups'])}, on or off")
     _check_rules(tv.get("rules") or {}, "tv")
     _check_quality(tv.get("quality") or {})
+
+
+def _check_queue(q: dict, who: str = "") -> None:
+    """Slots, the daily limit and the schedule (the films' queue or TV's)."""
+    for k in ("max_active", "max_per_day"):
+        if k in q and not (isinstance(q[k], int) and not isinstance(q[k], bool) and 0 <= q[k] <= 1000):
+            raise HTTPException(400, f"{who}{k} must be a whole number from 0 to 1000")
+    if q.get("max_active") == 0:
+        raise HTTPException(400, f"{who}downloads at once must be at least 1 (use Pause to stop)")
+    w = q.get("window")
+    if w is not None:
+        hhmm = lambda v: isinstance(v, str) and len(v) == 5 and v[2] == ":" and v[:2].isdigit() and v[3:].isdigit() and int(v[:2]) < 24 and int(v[3:]) < 60
+        if not isinstance(w, dict) or not all(hhmm(w.get(k, "00:00")) for k in ("start", "end")) \
+                or not all(isinstance(d, int) and 0 <= d <= 6 for d in w.get("days", [])):
+            raise HTTPException(400, f"{who}schedule: days 0 (Monday) to 6, and times as HH:MM")
 
 
 def _check_other(patch: dict) -> None:
@@ -451,12 +472,7 @@ def get_settings():
 def patch_settings(patch: dict):
     if "auth" in patch:
         raise HTTPException(400, "Change the sign-in under Settings → Security (or refetcharr login in the container)")
-    q = (patch.get("queue") or {})
-    for k in ("max_active", "max_per_day"):
-        if k in q and not (isinstance(q[k], int) and 0 <= q[k] <= 1000):
-            raise HTTPException(400, f"{k} must be a whole number from 0 to 1000")
-    if q.get("max_active") == 0:
-        raise HTTPException(400, "Downloads at once must be at least 1 (use Pause to stop)")
+    _check_queue(patch.get("queue") or {})
     _check_rules(patch.get("rules") or {})
     _check_other(patch)
     for k, name in (("radarr_url", "Radarr"), ("sonarr_url", "Sonarr")):
@@ -511,7 +527,7 @@ def fix_setup(body: FixIn):
 def queue(body: QueueIn):
     if not body.count and not body.ids:
         raise HTTPException(400, "Give a number of films or pick some")
-    return {"message": engine.queue_now(body.count, body.ids)}
+    return {"message": engine.queue_now(body.count, body.ids, body.kind)}
 
 
 @app.post("/api/ignore")
@@ -520,20 +536,33 @@ def ignore(body: IgnoreIn):
 
 
 @app.post("/api/queue/clear")
-def queue_clear():
-    return {"message": engine.clear_manual()}
+def queue_clear(body: KindIn | None = None):
+    kind = (body or KindIn()).kind
+    return {"message": engine.clear_manual("" if kind == "all" else kind)}
+
+
+def _pause(kind: str, on: bool) -> str:
+    """Pause or resume films, TV, or both (the TUI and CLI send no kind: both)."""
+    patch: dict = {}
+    if kind in ("all", "films"):
+        patch["queue"] = {"paused": on}
+    if kind in ("all", "tv"):
+        patch["tv"] = {"paused": on}
+    config.save(patch)
+    return {"all": "", "films": "Films ", "tv": "TV "}[kind]
 
 
 @app.post("/api/pause")
-def pause():
-    config.save({"queue": {"paused": True}})
-    return {"message": "Paused: no new searches start. Downloads already running finish and are imported."}
+def pause(body: KindIn | None = None):
+    who = _pause((body or KindIn()).kind, True)
+    return {"message": f"{who or ''}Paused: no new {'searches' if not who else who.strip().lower() + ' searches'} start. "
+                       "Downloads already running finish and are imported."}
 
 
 @app.post("/api/resume")
-def resume():
-    config.save({"queue": {"paused": False}})
-    return {"message": "Resumed."}
+def resume(body: KindIn | None = None):
+    who = _pause((body or KindIn()).kind, False)
+    return {"message": f"{who}Resumed." if who else "Resumed."}
 
 
 @app.post("/api/scan")

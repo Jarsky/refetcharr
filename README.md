@@ -43,8 +43,9 @@ On one 4,900-film library it has freed **16 TB** so far.
   right with a better file.
 - **Explains every decision**: open any film to see why it was flagged, the file before, the release chosen and the
   file now, why that release won, and every release turned down with the reason.
-- **Runs by itself or by hand**: auto-queue within your limits (downloads at once, films per day, a schedule of days
-  and hours), or queue films yourself. Pause any time.
+- **Runs by itself or by hand**: auto-queue within your limits (downloads at once, grabs per day, a schedule of days
+  and hours), or queue films yourself. Pause any time. Films and TV each have their own queue, limits, schedule and
+  Pause, shown side by side in the top bar.
 - **TV through Sonarr**: each complete season is replaced by a season pack, judged as a whole (its size and runtime
   added up, its rating averaged). When no pack qualifies, it can go episode by episode. TV has its own sizes, groups and
   rating thresholds, behind a Films / TV switch, because TV encodes are leaner than films'.
@@ -78,7 +79,7 @@ Open `http://<host>:8787`, create the sign-in, then:
    film or season to see why.
 4. Replace a few by hand (**Replace selected**, or **Find replacements** to choose the release yourself), check the
    results under **Activity → Replaced**, then switch on **Auto-queue** when you're happy. TV joins auto-queue only
-   when **Auto-queue TV too** is on (Settings → Replacement, TV).
+   when TV's own auto-queue is on (the top bar, or Settings → Queue & schedule).
 
 A prebuilt image is also published: use `image: ghcr.io/jarsky/refetcharr:latest` in `docker-compose.yml` instead of
 `build: .`.
@@ -117,9 +118,9 @@ Everything is set in the web UI and saved in `config/settings.json`. The default
 
 | Page | What's there |
 |---|---|
-| **Replacement** | Which groups to go after; what to keep (HDR, surround, Atmos, lossless, English); release groups to leave alone or never download; file sizes (sliders like Radarr's quality sizes); preferred video and audio codecs; seeders. Films and TV each have their own (the release group lists are shared); TV adds Auto-queue TV and Episode by episode |
+| **Replacement** | Which groups to go after; what to keep (HDR, surround, Atmos, lossless, English); release groups to leave alone or never download; file sizes (sliders like Radarr's quality sizes); preferred video and audio codecs; seeders. Films and TV each have their own (the release group lists are shared); TV adds Episode by episode |
 | **Quality** | The LOW / MEDIUM / HIGH thresholds per resolution (SD, 720p, 1080p, 4K) and for audio; the least rating a replacement may have; how to pick (smallest HIGH, or nearest the preferred size); codec efficiency. Films and TV each have their own |
-| **Queue & schedule** | Auto-queue, downloads at once, grabs per day, rescan interval, days and hours to search in (for films and TV together) |
+| **Queue & schedule** | Auto-queue, downloads at once, grabs per day, and the days and hours to search in, for films and TV each; the rescan interval |
 | **Radarr** / **Sonarr** | Each connection, Refetcharr's address for their webhooks, and the setup checks with their fixes |
 | **Timings** | How long to wait on Radarr, Sonarr and qBittorrent before deciding something |
 | **Security** | The sign-in and the API key |

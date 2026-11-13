@@ -106,7 +106,9 @@ class Engine:
     def __init__(self):
         self.jobs: collections.deque = collections.deque()
         self.manual_ids: collections.deque = collections.deque()  # films asked for by name, done first
-        self.manual_count = 0  # "queue N now": this many more of the biggest wins
+        self.manual_count = 0  # "queue N now": this many more of the biggest wins (films)
+        self.manual_count_tv = 0  # ...and of seasons
+        self._tv_turn = False  # films and TV take turns starting searches
         self.upgrades: dict = {}  # films queued again to be put right: id -> {"need": ..., "previous": ...}
         self.episodes: dict = {}  # episode items of seasons replaced episode by episode (no season pack qualified)
         self.busy = ""  # what the worker is doing right now
@@ -124,22 +126,36 @@ class Engine:
         self._stop = threading.Event()
 
     # ── requests from the TUI and web UI ────────────────────────────────────
-    def queue_now(self, count: int = 0, ids: list | None = None) -> str:
-        """Films asked for by hand start one after another straight away: the downloads-at-once and daily limits and the
-        schedule are for auto-queue, so they don't hold these back. Pause still does."""
+    def queue_now(self, count: int = 0, ids: list | None = None, kind: str = "films") -> str:
+        """Items asked for by hand start one after another straight away: the downloads-at-once and daily limits and the
+        schedule are for auto-queue, so they don't hold these back. Their kind's Pause still does. `count`: the next
+        biggest wins of `kind` (films or TV seasons)."""
         for i in ids or []:
             if int(i) not in self.manual_ids:
                 self.manual_ids.append(int(i))
-        self.manual_count += max(0, int(count))
-        what = ", ".join(filter(None, [f"{len(ids)} chosen film(s)" if ids else "", f"the next {count} biggest wins" if count else ""]))
+        if kind == "tv":
+            self.manual_count_tv += max(0, int(count))
+        else:
+            self.manual_count += max(0, int(count))
+        noun = "seasons" if kind == "tv" else "films"
+        what = ", ".join(filter(None, [f"{len(ids)} chosen" if ids else "", f"the next {count} biggest wins ({noun})" if count else ""]))
         store.log("queue", f"Queued {what}")
-        held = " Refetcharr is paused: they start when you resume." if config.load()["queue"].get("paused") else ""
-        return f"Queued {what}. They start one after another now, whatever the limits.{held}"
+        s = config.load()
+        kinds = {config.kind_of(i) for i in ids or []} | ({kind} if count else set())
+        held = [k for k in kinds if config.queue_of(s, k).get("paused")]
+        note = f" {' and '.join('TV' if k == 'tv' else 'Films' for k in sorted(held))} paused: they start when you resume." if held else ""
+        return f"Queued {what}. They start one after another now, whatever the limits.{note}"
 
-    def clear_manual(self) -> str:
+    def clear_manual(self, kind: str = "") -> str:
+        """Forget what's waiting to be searched (of one kind, or all)."""
+        keep = [i for i in self.manual_ids if kind and config.kind_of(i) != kind]
         self.manual_ids.clear()
-        self.manual_count = 0
-        store.log("queue", "Cleared the manual queue")
+        self.manual_ids.extend(keep)
+        if kind in ("", "films"):
+            self.manual_count = 0
+        if kind in ("", "tv"):
+            self.manual_count_tv = 0
+        store.log("queue", "Cleared the manual queue" + (f" ({'TV' if kind == 'tv' else 'films'})" if kind else ""))
         return "Cleared what was waiting to be searched (downloads already running carry on)."
 
     def request_scan(self) -> str:
@@ -192,7 +208,8 @@ class Engine:
             "today": store.grabbed_on(dt.date.today()),
             "busy": self.busy,
             "setup_issues": self.setup_issues, "setup_apps": self.setup_apps,
-            "waiting": {"ids": list(self.manual_ids), "count": self.manual_count},
+            "waiting": {"ids": list(self.manual_ids), "count": self.manual_count, "count_tv": self.manual_count_tv},
+            "kinds": self._kinds(s, state, active, failed, done),
             "suggesting": sum(1 for j in self.jobs if isinstance(j, tuple) and j[0] == "suggest"),
             "suggestions": len(self._load_json("suggestions.json", {})),
             "counts": dict(counts),
@@ -208,6 +225,20 @@ class Engine:
             "tv_scanned": "tv" in self.scan_summary,
             "activity": [dict(x, item=activity_kind(x)) for x in store.recent(80)],
         }
+
+    def _kinds(self, s: dict, state: dict, active: list, failed: list, done: list) -> dict:
+        """Each kind's queue and numbers, for the top bar and the dashboard tiles."""
+        out = {}
+        for k in config.KINDS:
+            q = config.queue_of(s, k)
+            mine = lambda xs, k=k: [x for x in xs if config.kind_of(x["id"]) == k]
+            dn = [e for mid, e in state.items() if e["status"] == "replaced" and config.kind_of(mid) == k]
+            out[k] = {"paused": bool(q.get("paused")), "auto": bool(q["auto"]), "in_window": self.in_window(q),
+                      "max_active": q["max_active"], "max_per_day": q["max_per_day"], "today": store.grabbed_on(dt.date.today(), k),
+                      "active": len(mine(active)), "stalled": sum(1 for a in mine(active) if a["stalled"]),
+                      "failed": len(mine(failed)), "replaced": len(dn), "freed": sum(store.freed(e) for e in dn if store.freed(e) > 0),
+                      "waiting": sum(1 for i in self.manual_ids if config.kind_of(i) == k) + (self.manual_count_tv if k == "tv" else self.manual_count)}
+        return out
 
     def films(self) -> list:
         """The latest scan's flagged films, with what Refetcharr has done with each and whether it's left alone (worked
@@ -325,52 +356,72 @@ class Engine:
         return now.weekday() in w.get("days", []) and inside
 
     def refill(self, s: dict) -> None:
-        """Start one more search. Films asked for by hand go first and ignore the limits and schedule (only Pause holds
-        them); auto-queue needs a free slot, room in today's limit, and the schedule."""
-        q = s["queue"]
-        if q.get("paused"):
-            return
+        """Start one more search. Films and TV each have their own queue (pause, auto-queue, slots, daily limit, schedule)
+        and take turns. Items asked for by hand go first and ignore the limits and schedule (only their Pause holds them);
+        auto-queue needs a free slot of its kind, room in today's limit, and the schedule."""
         state = store.load()
-        if not (self.manual_ids or self.manual_count or self._auto_room(q, state)):
-            return
+        order = ("tv", "films") if self._tv_turn else ("films", "tv")
+        self._tv_turn = not self._tv_turn
+        for kind in order:
+            if self._refill_kind(kind, s, state):
+                return
+
+    def _refill_kind(self, kind: str, s: dict, state: dict) -> bool:
+        """One search of this kind, if there's one to start (True when a search was started)."""
+        q = config.queue_of(s, kind)
+        if q.get("paused") or (kind == "tv" and not arr.tv_on()):
+            return False
+        waiting = [i for i in self.manual_ids if config.kind_of(i) == kind]
+        count = self.manual_count_tv if kind == "tv" else self.manual_count
+        if not (waiting or count or self._auto_room(q, state, kind)):
+            return False
         movies = self.library()
         by_id = {m["id"]: m for m in movies} | self.episodes
         mid, by_hand = None, False
-        while self.manual_ids and mid is None:
-            c = self.manual_ids.popleft()
+        for c in waiting:
+            self.manual_ids.remove(c)
             # chosen by hand: tried even if its group is off or it's ignored (an episode of the fallback may not be read yet)
             if str(c) not in state and (c in by_id or ids.kind(c) == "episode"):
                 mid, by_hand = c, True
-        if mid is None and (self.manual_count > 0 or self._auto_room(q, state)):
-            mid = next(iter(self.candidates(movies, s, state)), None)
-            if self.manual_count > 0:
+                break
+        if mid is None and (count > 0 or self._auto_room(q, state, kind)):
+            mid = next(iter(self.candidates(movies, s, state, kind)), None)
+            if count > 0:
                 by_hand = mid is not None
-                self.manual_count = self.manual_count - 1 if mid is not None else 0  # nothing left to queue: stop asking
-        if mid is not None:
-            m = by_id.get(mid) or arr.item(mid)
-            if not m.get("movieFile"):
-                return
-            up = self.upgrades.pop(mid, None)
-            self.try_film(m, s, "upgrade" if up else "", (up or {}).get("need"), (up or {}).get("previous"), by_hand=by_hand)
+                left = count - 1 if mid is not None else 0  # nothing left to queue: stop asking
+                if kind == "tv":
+                    self.manual_count_tv = left
+                else:
+                    self.manual_count = left
+        if mid is None:
+            return False
+        m = by_id.get(mid) or arr.item(mid)
+        if not m.get("movieFile"):
+            return True
+        up = self.upgrades.pop(mid, None)
+        self.try_film(m, s, "upgrade" if up else "", (up or {}).get("need"), (up or {}).get("previous"), by_hand=by_hand)
+        return True
 
-    def _auto_room(self, q: dict, state: dict) -> bool:
-        """Whether auto-queue may start another film: it's on, inside the schedule, with a free slot and room today."""
+    def _auto_room(self, q: dict, state: dict, kind: str = "films") -> bool:
+        """Whether auto-queue may start another of this kind: it's on, inside its schedule, with a free slot of its own and
+        room in its daily limit."""
         if not (q["auto"] and self.in_window(q)):
             return False
         # a stalled download isn't using its slot: it stays tracked, and imports if it ever finishes
-        if sum(1 for e in state.values() if e["status"] in store.PENDING and not e.get("stalled")) >= q["max_active"]:
+        if sum(1 for mid, e in state.items() if e["status"] in store.PENDING and not e.get("stalled")
+               and config.kind_of(mid) == kind) >= q["max_active"]:
             return False
-        return not (q["max_per_day"] and store.grabbed_on(dt.date.today()) >= q["max_per_day"])
+        return not (q["max_per_day"] and store.grabbed_on(dt.date.today(), kind) >= q["max_per_day"])
 
-    def candidates(self, movies: list, s: dict, state: dict | None = None) -> list:
-        """Film ids worth trying from the groups switched on, leaving out ignored films: the biggest savings first, then
-        the tiny files, the smallest first (those cost space rather than free it)."""
+    def candidates(self, movies: list, s: dict, state: dict | None = None, kind: str = "films") -> list:
+        """Ids of one kind worth trying from its groups switched on, leaving out ignored ones: the biggest savings first,
+        then the tiny files, the smallest first (those cost space rather than free it)."""
         state = store.load() if state is None else state
-        ig, tv_auto = s["ignore"], s["tv"]["auto"]
+        ig = s["ignore"]
         out = []
-        for m in movies + self._fallback_episodes(state, s):
-            if ids.is_tv(m["id"]) and not tv_auto:
-                continue  # TV is only replaced when picked by hand until "Auto-queue TV" is on
+        for m in movies + (self._fallback_episodes(state, s) if kind == "tv" else []):
+            if config.kind_of(m["id"]) != kind:
+                continue
             si = config.for_item(s, m["id"])
             r = si["rules"]
             on = {g for g, v in si["queue"]["groups"].items() if v}
@@ -487,7 +538,7 @@ class Engine:
         if by_hand:
             self.manual_ids.extend(i for i in todo if i not in self.manual_ids)
         store.log("queue", f"{m['title']}: no season pack qualifies, so its {len(todo)} episodes are tried one by one"
-                           + ("" if by_hand or config.load()["tv"]["auto"] else " (when picked by hand, or with Auto-queue TV on)"), id=m["id"])
+                           + ("" if by_hand or config.load()["tv"]["auto"] else " (when picked by hand, or with TV's auto-queue on)"), id=m["id"])
 
     def _grab(self, m: dict, s: dict, rel: dict, ranked: list, releases: list, base: dict, decision: dict, by_hand: bool = False,
               replace: bool = False) -> None:

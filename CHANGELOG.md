@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.0 (2026-11-13)
+
+- **Films and TV run their own queues**: each has its own auto-queue, Pause, downloads at once, grabs per day and
+  schedule (Settings → Queue & schedule, side by side). TV's start at 2 at once and 10 a day; a big season pack no
+  longer takes a film's slot. Searches take turns between the two. Items queued by hand wait only for their own kind's
+  Pause.
+- **The top bar** shows each kind's queue: auto or by hand, and Pause, one click each. The old "Auto-queue TV too"
+  switch is now TV's own auto-queue.
+- **One Films / TV switch in the top bar** for every list: Flagged, Suggestions, Replaced, Not replaced and Events all
+  follow it (the settings pages keep their own, since you edit one kind at a time).
+- **Queue the biggest wins** takes films or TV seasons, and the dashboard's tiles split freed, replaced, downloading,
+  grabbed today and not replaced into films and TV.
+- **Calmer pages**: the explanations under headings, switches and fields moved into a small ⓘ beside the label: hover,
+  focus or tap it for a balloon. Warnings and anything you need to act on stay on the page.
+- `POST /api/pause`, `/api/resume` and `/api/queue/clear` take `{"kind": "films" | "tv" | "all"}` (no body: both, as
+  the terminal UI and commands do); `POST /api/queue` takes `"kind"` for its count.
+
 ## 1.9.1 (2026-11-13)
 
 - **Films and TV apart on the dashboard**: with Sonarr connected, the dashboard has a Films band and a TV band, each

@@ -99,7 +99,11 @@ TV_SIZES = {"tiny_1080": 8, "tiny_2160": 20, "min_1080": 15, "min_2160": 40, "pr
 TV_QUALITY = {"video": {"sd": [0.5, 1.0], "720": [1.2, 2.2], "1080": [2.0, 3.5], "2160": [7.0, 11.0]}}
 DEFAULTS["tv"] = {
     "enabled": True,  # look after TV once Sonarr is connected
-    "auto": False,  # auto-queue (and "queue the biggest wins") takes seasons too; off: only seasons picked by hand
+    "auto": False,  # TV's auto-queue; off: only seasons picked by hand (1.10.0: TV's queue is run apart from the films')
+    "paused": False,  # no new TV searches (TV downloads already running carry on)
+    "max_active": 2,  # TV downloads at once (season packs are big), on top of the films'
+    "max_per_day": 10,  # seasons and episodes grabbed per day (0 = no limit)
+    "window": copy.deepcopy(DEFAULTS["queue"]["window"]),
     "episode_fallback": True,  # when no season pack qualifies, replace the season episode by episode
     "groups": copy.deepcopy(DEFAULTS["queue"]["groups"]),
     "rules": {**copy.deepcopy(DEFAULTS["rules"]), **TV_SIZES},
@@ -146,12 +150,30 @@ def profile_of(r: dict, kind: str = "films") -> str:
     return next((k for k in PROFILES if all(r.get(x) == v for x, v in profile_rules(k, kind).items())), "custom")
 
 
+KINDS = ("films", "tv")
+QUEUE_KEYS = ("auto", "paused", "max_active", "max_per_day", "window")
+
+
+def kind_of(i) -> str:
+    """ "films" or "tv": which queue and settings an item belongs to."""
+    return "tv" if ids.is_tv(i) else "films"
+
+
+def queue_of(s: dict, kind: str) -> dict:
+    """A kind's queue: auto-queue, pause, slots, daily limit, schedule and groups. Films' are under "queue", TV's under
+    "tv" (1.10.0)."""
+    if kind != "tv":
+        return s["queue"]
+    tv = s["tv"]
+    return {**s["queue"], **{k: tv[k] for k in QUEUE_KEYS}, "groups": tv["groups"]}
+
+
 def for_item(s: dict, i) -> dict:
-    """The settings as they apply to one item: a season's or an episode's rules, groups and quality are TV's."""
+    """The settings as they apply to one item: a season's or an episode's rules, groups, quality and queue are TV's."""
     if not ids.is_tv(i):
         return s
     tv = s["tv"]
-    return {**s, "rules": tv["rules"], "quality": tv["quality"], "queue": {**s["queue"], "groups": tv["groups"]}}
+    return {**s, "rules": tv["rules"], "quality": tv["quality"], "queue": queue_of(s, "tv")}
 
 
 _lock = threading.Lock()

@@ -7,10 +7,42 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const size = (b) => { const g = (b || 0) / 1e9; return g >= 1000 ? `${(g / 1000).toFixed(2)} TB` : `${g.toFixed(1)} GB`; };
 let pageVersion = null;   // the server's version this page was loaded with
+// 1.10.0: explanations live behind a small info button; hovering, focusing or tapping it shows a balloon
+const tip = (t) => `<button type="button" class="tip" data-tip="${esc(t)}" aria-label="${esc(t)}">i</button>`;
+function setTip(id, t) { const b = $(id); if (b) { b.dataset.tip = t; b.setAttribute("aria-label", t); b.hidden = !t; } }
+const balloon = Object.assign(document.createElement("div"), { className: "balloon", hidden: true, role: "tooltip", id: "balloon" });
+document.body.append(balloon);
+let tipFor = null, pinned = null;   // pinned: opened by a click or tap, stays until the next one
+function showTip(b) {
+  if (!b.dataset.tip) return;
+  (b.closest("dialog") || document.body).append(balloon);   // a modal dialog sits above the page: the balloon must be in it
+  tipFor?.setAttribute("aria-expanded", "false");
+  tipFor = b; b.setAttribute("aria-expanded", "true"); b.setAttribute("aria-describedby", "balloon");
+  balloon.textContent = b.dataset.tip; balloon.hidden = false;
+  const r = b.getBoundingClientRect(), w = balloon.offsetWidth, h = balloon.offsetHeight;
+  const left = Math.min(Math.max(12, r.left + r.width / 2 - w / 2), innerWidth - w - 12);
+  const below = r.bottom + 8 + h < innerHeight - 8;
+  balloon.style.left = `${left}px`; balloon.style.top = `${below ? r.bottom + 8 : r.top - h - 8}px`;
+}
+function hideTip() { balloon.hidden = true; tipFor?.setAttribute("aria-expanded", "false"); tipFor = pinned = null; }
+document.addEventListener("mouseover", (e) => { const b = e.target.closest?.(".tip"); if (b && !pinned) showTip(b); });
+document.addEventListener("mouseout", (e) => { const b = e.target.closest?.(".tip"); if (b && !b.contains(e.relatedTarget) && pinned !== b) hideTip(); });
+document.addEventListener("focusin", (e) => { const b = e.target.closest?.(".tip"); if (b) showTip(b); else if (tipFor && !pinned) hideTip(); });
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".tip");
+  if (!b) { if (tipFor) hideTip(); return; }
+  e.preventDefault(); e.stopPropagation();   // a click or tap pins it open (phones); it never opens a row or flips a switch
+  if (pinned === b) { hideTip(); return; }
+  showTip(b); pinned = b;
+}, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && tipFor) hideTip(); });
+addEventListener("scroll", () => { if (tipFor) hideTip(); }, true);
 // 1.9.0: films (Radarr) and TV seasons and episodes (Sonarr). Pages with a Films / TV switch remember it; it shows once Sonarr is connected.
 const KIND_KEY = "refetcharr-kind-";
 const isTv = (x) => x?.kind === "season" || x?.kind === "episode";
+const LIST_TABS = ["library", "suggestions", "replaced", "failed", "events"];
 function kindOf(page) {
+  if (page === "lib" || page === "sg") page = "view";   // 1.10.0: every list follows the one switch in the top bar
   if (status && !status.tv) return "films";
   try { return localStorage.getItem(KIND_KEY + page) || "films"; } catch { return "films"; }
 }
@@ -21,7 +53,7 @@ const epCount = (x) => (x?.kind === "season" && x.episodes ? ` <span class="mute
 function paintKinds() {
   const on = !!status?.tv;
   document.querySelectorAll("[data-kind-for]").forEach((g) => {
-    g.hidden = !on; const bar = g.closest(".kindbar"); if (bar) bar.hidden = !on;
+    g.hidden = !on || (g.dataset.kindFor === "view" && !LIST_TABS.includes(currentTab())); const bar = g.closest(".kindbar"); if (bar) bar.hidden = !on;
     g.querySelectorAll("[data-kind]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.kind === kindOf(g.dataset.kindFor)));
   });
 }
@@ -121,8 +153,9 @@ function showTab() {
   if (tab === "replaced") loadReplaced(true);
   if (tab === "suggestions") loadSuggestions();
   markSeen(tab);
+  paintKinds();
 }
-window.addEventListener("hashchange", showTab);
+window.addEventListener("hashchange", () => { hideTip(); showTab(); });
 // the menu slides in on small screens
 function closeMenu() { $("side").classList.remove("open"); $("scrim").hidden = true; $("menu").setAttribute("aria-expanded", "false"); }
 $("menu").addEventListener("click", () => {
@@ -131,6 +164,32 @@ $("menu").addEventListener("click", () => {
 });
 $("scrim").addEventListener("click", closeMenu);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+// ── 1.10.0: each kind's queue in the top bar: auto or by hand, and its own pause ──
+function renderControls(s) {
+  const tv = !!s.tv;
+  $("ctl-tv").hidden = !tv;
+  for (const k of ["films", "tv"]) {
+    const q = s.kinds?.[k]; if (!q) continue;
+    const name = k === "tv" ? "TV" : "Films";
+    const mode = q.auto ? (q.in_window ? "Auto" : "Auto · waiting") : "By hand";
+    const modeTip = q.auto ? (q.in_window ? `${name}: auto-queue keeps ${q.max_active} at once topped up. Click for by hand` : `${name}: auto-queue, outside its schedule. Click for by hand`)
+      : `${name}: only what you queue. Click to keep downloads topped up by itself`;
+    $(`ctl-${k}`).innerHTML = `${tv ? `<span class="qctl-name"><span class="band-dot ${k === "tv" ? "tv" : "film"}"></span>${name}</span>` : ""}
+      <button type="button" class="pill ${q.auto ? "auto" : "manual"}" data-auto="${k}" title="${esc(modeTip)}">${mode}</button>
+      <button type="button" class="btn sm ${q.paused ? "paused" : ""}" data-pause="${k}" aria-pressed="${q.paused}"
+        title="${q.paused ? `${name} paused: no new searches. Click to resume` : `Stop new ${name.toLowerCase()} searches (downloads already running finish and import)`}">${q.paused ? "Paused" : "Pause"}</button>`;
+  }
+}
+document.querySelector(".actions").addEventListener("click", (e) => {
+  const a = e.target.closest("[data-auto]"), p = e.target.closest("[data-pause]");
+  if (a) {
+    const k = a.dataset.auto, on = !status?.kinds?.[k]?.auto, name = k === "tv" ? "TV" : "Films";
+    act(async () => { await api("PATCH", "/api/settings", k === "tv" ? { tv: { auto: on } } : { queue: { auto: on } });
+      return { message: on ? `${name}: auto-queue on, kept topped up within its limits.` : `${name}: by hand, only what you queue is searched for.` }; });
+  }
+  if (p) { const k = p.dataset.pause; act(() => api("POST", status?.kinds?.[k]?.paused ? "/api/resume" : "/api/pause", { kind: k })); }
+});
 
 // ── dashboard ─────────────────────────────────────────────────────────────
 function shortError(e) {
@@ -150,27 +209,26 @@ async function refresh() {
   pageVersion = s.version;
   $("version").textContent = `v${s.version}`;
   $("s-freed").textContent = size(s.freed);
-  $("s-freed-label").textContent = s.grown?.films ? `freed · ${s.grown.films} tiny file${s.grown.films === 1 ? "" : "s"} grew ${size(s.grown.bytes)}` : "freed";
+  // a tile: its label, then films and TV apart on a quiet second line (1.10.0)
+  const splitLine = (f, t) => (s.tv && s.kinds?.tv ? `<span class="split"><span class="band-dot film"></span>${f}<span class="band-dot tv"></span>${t}</span>` : "");
+  $("s-freed-label").innerHTML = "freed" + (s.grown?.films ? tip(`${s.grown.films} tiny file${s.grown.films === 1 ? "" : "s"} were swapped for bigger ones, adding ${size(s.grown.bytes)}: not counted here`) : "")
+    + splitLine(size(s.kinds?.films?.freed), size(s.kinds?.tv?.freed));
   $("s-replaced").textContent = c.replaced || 0;
-  $("s-active").textContent = `${s.active.length - s.stalled}/${s.limits.max_active}`;
+  const K = s.kinds || {}, split = !!s.tv && K.tv;
+  $("s-active").textContent = split ? `${s.active.length - s.stalled}/${K.films.max_active + K.tv.max_active}` : `${s.active.length - s.stalled}/${s.limits.max_active}`;
   const warned = [s.stalled ? `${s.stalled} stalled` : "", s.stuck ? `${s.stuck} waiting on qBittorrent` : ""].filter(Boolean).join(", ");
-  const tvDl = s.active.filter(isTv).length;
-  $("s-active-label").textContent = ["downloading", s.tv && tvDl ? `${s.active.length - tvDl} films, ${tvDl} TV` : "", warned].filter(Boolean).join(" · ");
+  $("s-active-label").innerHTML = esc(["downloading", warned].filter(Boolean).join(" · "))
+    + (split ? splitLine(`${K.films.active - K.films.stalled}/${K.films.max_active}`, `${K.tv.active - K.tv.stalled}/${K.tv.max_active}`) : "");
   $("stat-active").classList.toggle("warned", !!warned);
-  $("s-today").textContent = `${s.today}/${s.limits.max_per_day || "∞"}`;
+  $("s-today").textContent = split ? K.films.today + K.tv.today : `${s.today}/${s.limits.max_per_day || "∞"}`;
+  $("s-today-label").innerHTML = "grabbed today" + (split ? splitLine(`${K.films.today}/${K.films.max_per_day || "∞"}`, `${K.tv.today}/${K.tv.max_per_day || "∞"}`) : "");
+  $("s-replaced-label").innerHTML = "replaced" + (split ? splitLine(K.films.replaced, K.tv.replaced) : "");
   $("s-failed").textContent = s.failed.length;
-  const mode = $("mode");
-  mode.className = "pill " + (s.auto ? "auto" : "manual");
-  mode.textContent = s.auto ? (s.in_window ? "Auto-queue on" : "Auto-queue (outside schedule)") : "Manual queue";
-  mode.title = s.auto ? "Keeping downloads topped up by itself. Click for manual: only what you queue" : "Only what you queue. Click to keep downloads topped up by itself";
-  const waiting = s.waiting.ids.length + s.waiting.count;
-  $("busy").textContent = (s.busy ? s.busy + "…" : "Idle") + (waiting ? ` · ${waiting} waiting to search${s.paused ? " (paused)" : ""}` : "")
+  $("s-failed-label").innerHTML = "not replaced" + (split ? splitLine(K.films.failed, K.tv.failed) : "");
+  renderControls(s);
+  const waiting = s.waiting.ids.length + s.waiting.count + (s.waiting.count_tv || 0);
+  $("busy").textContent = (s.busy ? s.busy + "…" : "Idle") + (waiting ? ` · ${waiting} waiting to search` : "")
     + (s.suggesting ? ` · ${s.suggesting} to find replacements for` : "");
-  const pause = $("pause");
-  pause.textContent = s.paused ? "Paused" : "Pause";
-  pause.classList.toggle("paused", s.paused);
-  pause.title = s.paused ? "Paused: no new searches start. Click to resume" : "Stop starting new searches (downloads already running finish and import)";
-  pause.setAttribute("aria-pressed", s.paused);
   const problem = shortError(s.error);
   let dismissed = ""; try { dismissed = sessionStorage.getItem("refetcharr-dismissed") || ""; } catch { /* private window */ }
   $("error").hidden = !problem || problem === dismissed;
@@ -193,8 +251,7 @@ async function refresh() {
   feed("activity", "film");
   if (bands) { renderDownloads("active-tv", tvs, "No TV downloading."); feed("activity-tv", "tv"); }
   const stalledOf = (xs) => xs.filter((a) => a.stalled).length;
-  const countText = (xs) => (xs.length ? `· ${xs.length - stalledOf(xs)} downloading${stalledOf(xs) ? `, ${stalledOf(xs)} stalled` : ""}` : "");
-  $("active-tv-count").textContent = countText(tvs);
+  const slotText = (xs, k) => (xs.length && s.kinds?.[k] ? `· ${xs.length - stalledOf(xs)} of ${s.kinds[k].max_active} at once${stalledOf(xs) ? `, ${stalledOf(xs)} stalled` : ""}` : "");
 
   const sum = s.scan.summary || {};
   $("scan-at").textContent = s.scan.at ? `· ${s.scan.at.replace("T", " ")}` : "· not scanned yet";
@@ -203,11 +260,12 @@ async function refresh() {
      <span>${k === "tiny" ? `need bigger files${groups?.tiny ? " · going after them" : " · switched off"}` : `about ${(sm[k].saving_gb / 1000).toFixed(1)} TB to win`}</span></div>`).join("");
   const filmTiles = tiles(sum, "films", s.groups), tvTiles = s.tv && sum.tv ? tiles(sum.tv, "seasons", s.tv_groups) : "";
   $("scan-summary").innerHTML = (filmTiles && tvTiles ? `<h3 class="groups-h">Films</h3>` : "") + filmTiles
-    + (tvTiles ? `<h3 class="groups-h">TV${s.tv_auto ? "" : ' <span class="muted small">· picked by hand only (Auto-queue TV is off)</span>'}</h3>${tvTiles}` : "")
+    + (tvTiles ? `<h3 class="groups-h">TV</h3>${tvTiles}` : "")
     + (s.tv && !s.tv_scanned ? `<p class="muted small groups-h">TV shows here after the next rescan.</p>` : "")
     || `<p class="empty">Run a scan to see the library's oversized films${s.tv ? " and seasons" : ""}.</p>`;
 
-  $("active-count").textContent = bands ? countText(films) + (s.active.length ? ` · ${s.active.length - s.stalled} of ${s.limits.max_active} at once, films and TV` : "")
+  $("active-tv-count").textContent = slotText(tvs, "tv");
+  $("active-count").textContent = bands ? slotText(films, "films")
     : s.active.length ? `· ${s.active.length - s.stalled} of ${s.limits.max_active} at once${s.stalled ? `, ${s.stalled} stalled` : ""}` : "";
   paintKinds();
   renderFailed(); loadReplaced(); if (currentTab() === "suggestions") loadSuggestions(true);
@@ -232,11 +290,11 @@ function renderDownloads(box, list, empty) {
 }
 
 function renderFailed() {
-  const rows = status.failed;
+  const rows = status.failed.filter(ofKind("view"));
   const keep = new Set([...document.querySelectorAll("#fail-rows input:checked")].map((i) => i.value));
   $("fail-rows").innerHTML = rows.map((x) => xrow("fail-rows", x.id, `<td class="pick"><input type="checkbox" value="${x.id}" ${keep.has(String(x.id)) ? "checked" : ""} aria-label="Select ${esc(x.title)}"></td>
     <td>${esc(x.title)} <span class="yr">${x.year || ""}</span></td><td>${esc(x.status)}</td><td class="why">${esc(x.problem)}</td><td class="r">${size(x.old_size)}</td>`)).join("")
-    || `<tr><td colspan="5" class="empty">Every film tried so far was replaced or is still in progress.</td></tr>`;
+    || `<tr><td colspan="5" class="empty">Every ${kindOf("view") === "tv" ? "season" : "film"} tried so far was replaced or is still in progress.</td></tr>`;
   $("retry-all").disabled = !rows.length;
   updateRetrySel();
 }
@@ -259,9 +317,9 @@ const ISSUE_TAG = (t) => `<span class="tag" style="--c: var(--red)">${esc(t)}</s
 function renderReplaced() {
   if (!replacedRows) return;
   const q = $("done-q").value.trim().toLowerCase(), keep = new Set([...document.querySelectorAll("#done-rows input:checked")].map((i) => i.value));
-  const withIssues = replacedRows.filter((x) => x.issues.length);
-  $("done-n-all").textContent = replacedRows.length; $("done-n-issues").textContent = withIssues.length;
-  const rows = (doneShow === "issues" ? withIssues : replacedRows).filter((x) => !q || x.title.toLowerCase().includes(q)).slice(0, 400);
+  const mine = replacedRows.filter(ofKind("view")), withIssues = mine.filter((x) => x.issues.length);
+  $("done-n-all").textContent = mine.length; $("done-n-issues").textContent = withIssues.length;
+  const rows = (doneShow === "issues" ? withIssues : mine).filter((x) => !q || x.title.toLowerCase().includes(q)).slice(0, 400);
   $("done-rows").innerHTML = rows.map((x) => xrow("done-rows", x.id, `<td class="pick"><input type="checkbox" value="${x.id}" ${keep.has(String(x.id)) ? "checked" : ""} aria-label="Select ${esc(x.title)}"></td>
     <td>${esc(x.title)} <span class="yr">${x.year || ""}</span> ${x.issues.map(ISSUE_TAG).join(" ")}${x.again ? ' <span class="tag" style="--c: var(--cyan)">replaced again</span>' : ""}${x.problem ? `<div class="why">${esc(x.problem)}</div>` : ""}</td>
     <td>${esc(x.when || "")}</td><td>${esc(x.old_quality || "")}</td><td>${x.before?.rating != null ? rp(x.before) : qb(x.before_badge, "The original file wasn't rated when it was replaced, and it's gone now")}<span class="arrow">→</span>${x.after?.rating != null ? rp(x.after) : qb(x.after_badge)}</td>
@@ -462,14 +520,8 @@ $("lib-queue").addEventListener("click", () => act(async () => {
 }));
 
 // ── actions ───────────────────────────────────────────────────────────────
-$("queue-form").addEventListener("submit", (e) => { e.preventDefault(); act(() => api("POST", "/api/queue", { count: +$("queue-n").value })); });
-$("queue-clear").addEventListener("click", () => act(() => api("POST", "/api/queue/clear")));
-$("pause").addEventListener("click", () => act(() => api("POST", status?.paused ? "/api/resume" : "/api/pause")));
-$("mode").addEventListener("click", () => act(async () => {
-  const on = !status?.auto;
-  await api("PATCH", "/api/settings", { queue: { auto: on } });
-  return { message: on ? "Auto-queue on: downloads are kept topped up within your limits." : "Manual queue: only what you queue is searched for." };
-}));
+$("queue-form").addEventListener("submit", (e) => { e.preventDefault(); act(() => api("POST", "/api/queue", { count: +$("queue-n").value, kind: kindOf("queue") })); });
+$("queue-clear").addEventListener("click", () => act(() => api("POST", "/api/queue/clear", { kind: "all" })));
 $("scan").addEventListener("click", () => { $("scan-confirm").returnValue = "cancel"; $("scan-confirm").showModal(); });
 $("scan-confirm").addEventListener("close", () => { if ($("scan-confirm").returnValue === "scan") act(() => api("POST", "/api/scan")); });
 
@@ -495,10 +547,13 @@ async function loadSettings() {
   $("sconn-key-note").textContent = settings.secrets_set.sonarr_api_key && !conn.sonarr_api_key && settings.env.sonarr_api_key ? "Currently from the container's .env" : "";
   sc.tv_enabled.checked = settings.tv.enabled;
   if (currentTab() === "radarr" || currentTab() === "sonarr") loadSetup(false, currentTab());
-  const f = $("settings"), q = settings.queue;
-  f.auto.checked = q.auto; f.max_active.value = q.max_active; f.max_per_day.value = q.max_per_day;
-  f.w_enabled.checked = q.window.enabled; f.w_start.value = q.window.start; f.w_end.value = q.window.end;
-  $("set-days").innerHTML = DAYS.map((d, i) => `<button type="button" class="chip" data-d="${i}" aria-pressed="${q.window.days.includes(i)}">${d}</button>`).join("");
+  const f = $("settings");
+  for (const [k, q] of [["films", settings.queue], ["tv", settings.tv]]) {
+    f[`${k}_auto`].checked = q.auto; f[`${k}_max_active`].value = q.max_active; f[`${k}_max_per_day`].value = q.max_per_day;
+    f[`${k}_w_enabled`].checked = q.window.enabled; f[`${k}_w_start`].value = q.window.start; f[`${k}_w_end`].value = q.window.end;
+    document.querySelector(`[data-days="${k}"]`).innerHTML = DAYS.map((d, i) => `<button type="button" class="chip" data-d="${i}" aria-pressed="${q.window.days.includes(i)}">${d}</button>`).join("");
+  }
+  document.querySelector('.qcol[data-q="tv"]').hidden = !(settings.secrets_set.sonarr_api_key && settings.tv.enabled);
   f.every_days.value = settings.scan.every_days;
   fillTiming(settings.timing);
   const sec = $("security");
@@ -599,15 +654,13 @@ for (const app of ["radarr", "sonarr"]) {
   $(fixAll).addEventListener("click", () => applyFix(setupChecks[app].filter((c) => c.fix).map((c) => c.id), app));
   $(`${p}setup-refresh`).addEventListener("click", () => loadSetup(true, app));
 }
-$("set-days").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (b) b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true"); });
+document.querySelectorAll("[data-days]").forEach((box) => box.addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (b) b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true"); }));
 function settingsPatch() {
   const f = $("settings"), num = (n) => Number(f[n].value);
-  return {
-    queue: { auto: f.auto.checked, max_active: num("max_active"), max_per_day: num("max_per_day"),
-      window: { enabled: f.w_enabled.checked, start: f.w_start.value || "00:00", end: f.w_end.value || "23:59",
-        days: [...document.querySelectorAll("#set-days .chip")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => +b.dataset.d) } },
-    scan: { every_days: num("every_days") },
-  };
+  const q = (k) => ({ auto: f[`${k}_auto`].checked, max_active: num(`${k}_max_active`), max_per_day: num(`${k}_max_per_day`),
+    window: { enabled: f[`${k}_w_enabled`].checked, start: f[`${k}_w_start`].value || "00:00", end: f[`${k}_w_end`].value || "23:59",
+      days: [...document.querySelectorAll(`[data-days="${k}"] .chip`)].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => +b.dataset.d) } });
+  return { queue: q("films"), tv: q("tv"), scan: { every_days: num("every_days") } };
 }
 $("settings").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -664,14 +717,14 @@ function renderList(kind) {
   const list = codecLists[kind], known = catalog[kind], label = (id) => known.find((c) => c.id === id.toLowerCase())?.label ?? id;
   const rest = known.filter((c) => !list.some((x) => x.toLowerCase() === c.id));
   $(`list-${kind}`).innerHTML = `
-    <p class="muted">${list.length ? "Top of the list is tried first. Drag to reorder." : "No preference: every codec counts the same. Add some below, most preferred first."}</p>
+    ${list.length ? "" : `<p class="muted small">No preference: every codec counts the same. Add some below, most preferred first.</p>`}
     <ol class="rank" data-kind="${kind}">${list.map((id, i) => `<li draggable="true" data-i="${i}"><span class="grip" aria-hidden="true">⠿</span><b>${i + 1}</b><span class="nm">${esc(label(id))}</span>
       <button type="button" class="ic" data-up="${i}" ${i ? "" : "disabled"} aria-label="Move ${esc(label(id))} up">↑</button>
       <button type="button" class="ic" data-down="${i}" ${i < list.length - 1 ? "" : "disabled"} aria-label="Move ${esc(label(id))} down">↓</button>
       <button type="button" class="ic" data-del="${i}" aria-label="Remove ${esc(label(id))}">✕</button></li>`).join("")}</ol>
     <div class="addrow"><div class="chips">${rest.map((c) => `<button type="button" class="chip" data-add="${esc(c.id)}">+ ${esc(c.label)}</button>`).join("")}</div>
       <span class="inline"><input type="text" class="other" maxlength="40" placeholder="Something else in the title…" aria-label="Add another ${kind} codec"><button type="button" class="btn" data-other>Add</button></span></div>
-    <label class="switch"><input type="checkbox" data-strict ${strict[kind] ? "checked" : ""} ${list.length ? "" : "disabled"}><span>Only accept these <small>otherwise anything else just ranks last${kind === "audio" ? ". Many release titles don't name their audio at all, and those would be refused" : ""}</small></span></label>`;
+    <label class="switch"><input type="checkbox" data-strict ${strict[kind] ? "checked" : ""} ${list.length ? "" : "disabled"}><span>Only accept these${tip(`Otherwise anything else just ranks last${kind === "audio" ? ". Many release titles don't name their audio at all, and those would be refused" : ""}.`)}</span></label>`;
 }
 for (const kind of ["video", "audio"]) {
   const box = $(`list-${kind}`);
@@ -722,12 +775,12 @@ $("ig-films").addEventListener("click", (e) => { const b = e.target.closest("[da
 function fillRules(r, groups, ig, tv) {
   const f = $("rules"), isTvPage = kindOf("rules") === "tv";
   $("tv-card").hidden = !isTvPage;
-  $("groups-note").textContent = isTvPage ? "Which kinds of season Refetcharr looks for replacements for (by their sizes and ratings under TV's settings)."
-    : "Which kinds of film Refetcharr looks for replacements for.";
-  $("rules-kind-note").textContent = isTvPage ? "TV's own rules: everything on this page but the leave-alone lists applies to TV only." : "The rules for films. TV has its own: switch to TV.";
-  if (tv) { f.tv_auto.checked = tv.auto; f.tv_fallback.checked = tv.episode_fallback; }
+  setTip("groups-note", isTvPage ? "Which kinds of season Refetcharr looks for replacements for (by their sizes and ratings under TV's settings)."
+    : "Which kinds of film Refetcharr looks for replacements for.");
+  setTip("rules-kind-note", isTvPage ? "TV's own rules: everything on this page but the leave-alone lists applies to TV only." : "The rules for films. TV has its own: switch to TV.");
+  if (tv) f.tv_fallback.checked = tv.episode_fallback;
   $("set-groups").innerHTML = GROUP_KEYS.map((k) =>
-    `<label class="switch"><input type="checkbox" name="g_${k}" ${groups[k] ? "checked" : ""}><span>${GROUPS[k][0]}${GROUP_NOTE[k] ? ` <small>${GROUP_NOTE[k]}</small>` : ""}</span></label>`).join("");
+    `<label class="switch"><input type="checkbox" name="g_${k}" ${groups[k] ? "checked" : ""}><span>${GROUPS[k][0]}${GROUP_NOTE[k] ? tip(GROUP_NOTE[k]) : ""}</span></label>`).join("");
   if (ig) { for (const k of Object.keys(igLists)) { igLists[k] = [...ig[k]]; renderTags(k); } renderIgnoredFilms(ig.films); }
   $("sizes").innerHTML = sizeSlider(1080, r) + sizeSlider(2160, r);
   document.querySelectorAll("#sizes .qs").forEach(paintSlider);
@@ -753,7 +806,7 @@ function rulesPatch() {
   for (const kind of ["video", "audio"]) { r[`${kind}_codecs`] = codecLists[kind]; r[`${kind}_strict`] = strict[kind] && codecLists[kind].length > 0; }
   const groups = Object.fromEntries(GROUP_KEYS.map((k) => [k, f[`g_${k}`]?.checked ?? false]));
   const ignore = { file_groups: [...igLists.file_groups], release_groups: [...igLists.release_groups] };
-  if (kindOf("rules") === "tv") return { tv: { rules: r, groups, auto: f.tv_auto.checked, episode_fallback: f.tv_fallback.checked }, ignore };
+  if (kindOf("rules") === "tv") return { tv: { rules: r, groups, episode_fallback: f.tv_fallback.checked }, ignore };
   return { rules: r, queue: { groups }, ignore };
 }
 $("rules").addEventListener("submit", async (e) => {
@@ -962,14 +1015,13 @@ async function loadEvents() {
 }
 function renderEvents() {
   const q = $("ev-q").value.trim().toLowerCase();
-  const item = $("ev-item").value;
-  const v = events.filter((x) => evKinds.has(x.kind) && (!item || x.item === item) && (!q || x.text.toLowerCase().includes(q)));
+  const item = status?.tv ? (kindOf("view") === "tv" ? "tv" : "film") : "";
+  const v = events.filter((x) => evKinds.has(x.kind) && (!item || !x.item || x.item === item) && (!q || x.text.toLowerCase().includes(q)));
   $("ev-rows").innerHTML = v.slice(0, 1000).map((x) => `<tr><td>${esc(x.time)}</td><td><span class="kind ${esc(x.kind)}">${esc(x.kind)}</span></td><td>${esc(x.text)}</td></tr>`).join("")
     || `<tr><td colspan="3" class="empty">Nothing matches.</td></tr>`;
   $("ev-count").textContent = `${v.length.toLocaleString()} of ${events.length.toLocaleString()}`;
 }
 $("ev-q").addEventListener("input", renderEvents);
-$("ev-item").addEventListener("change", renderEvents);
 $("ev-kinds").addEventListener("click", (e) => {
   const b = e.target.closest(".chip"); if (!b) return;
   evKinds.has(b.dataset.k) ? evKinds.delete(b.dataset.k) : evKinds.add(b.dataset.k);
@@ -1033,7 +1085,7 @@ async function loadQuality() {
   try {
     const d = await api("GET", "/api/settings"), tv = kindOf("quality") === "tv";
     qDefaults = tv ? { quality: d.defaults.tv.quality, rules: d.defaults.tv.rules } : d.defaults;
-    $("quality-kind-note").textContent = tv ? "TV's own thresholds: TV encodes are leaner than films', so HIGH starts lower." : "The thresholds for films. TV has its own: switch to TV.";
+    setTip("quality-kind-note", tv ? "TV's own thresholds: TV encodes are leaner than films', so HIGH starts lower." : "The thresholds for films. TV has its own: switch to TV.");
     if (tv) fillQuality(d.values.tv.quality, d.values.tv.rules.min_picture, d.values.tv.rules.prefer); else fillQuality(d.values.quality, d.values.rules.min_picture, d.values.rules.prefer);
     clean("quality");
   }
@@ -1239,7 +1291,9 @@ document.addEventListener("click", (e) => {
   if ((page === "rules" || page === "quality") && !tracked.get(page).btn.disabled && !confirm("Switching drops the unsaved changes on this page. Carry on?")) return;
   try { localStorage.setItem(KIND_KEY + page, b.dataset.kind); } catch { /* private window */ }
   paintKinds();
-  ({ lib: () => { libShown = 200; renderFilms(); }, sg: renderSuggestions, rules: loadRules, quality: loadQuality })[page]();
+  const tab = currentTab();
+  ({ view: () => { libShown = 200; if (tab === "library") renderFilms(); if (tab === "suggestions") renderSuggestions(); if (tab === "replaced") renderReplaced();
+      if (tab === "failed") renderFailed(); if (tab === "events") renderEvents(); }, queue: () => {}, rules: loadRules, quality: loadQuality })[page]();
 });
 track("rules", () => JSON.stringify(rulesPatch()));
 track("quality", () => JSON.stringify([qv, qMin, qPrefer]));
