@@ -411,6 +411,6 @@ def test_suggestions_searched_before_ratings_are_rated_from_what_they_kept(monke
             x.pop(k, None)
     e._save_json("suggestions.json", old)
     again = e.suggestions()[0]
-    for was, now in zip([fresh["before"], *fresh["options"]], [again["before"], *again["options"]]):
+    for was, now in zip([fresh["before"], *fresh["options"]], [again["before"], *again["options"]], strict=True):
         assert {k: now[k] for k in rating_keys} == {k: was[k] for k in rating_keys}
     assert again["options"][1]["audio_rating"] is None  # audio the title doesn't name stays unrated
