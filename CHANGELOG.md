@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.9.0 (2026-11-13)
+
+- **TV, through Sonarr**: connect Sonarr under Settings → Sonarr (or `SONARR_API_KEY` in `.env`) and TV seasons are
+  flagged, searched, judged, grabbed, checked and imported like films. Each **complete season that has finished airing**
+  is one item: its size and runtime are its episodes' added up, its picture is rated on the bitrate averaged over its
+  runtime, and English audio must be in every episode. Seasons still airing or missing episodes are left alone.
+- **Season packs**: only packs for that one season are judged. Every episode of a downloaded pack is checked with ffprobe
+  before any is imported (one bad episode keeps the whole season), and a season counts as replaced once all its episodes
+  are in.
+- **Episode by episode**: when no season pack qualifies, each episode becomes an item of its own, searched and replaced
+  like a film and judged the way its season was (smaller, bigger or better). A season's details show where each of its
+  episodes is. It can be switched off (Settings → Replacement, TV).
+- **TV's own settings**: a Films / TV switch on Replacement and Quality. TV has its own groups, sizes, keep rules and
+  rating thresholds, defaulting to Sonarr's usual maximums (60 MB/min at 1080p, 120 at 4K) and to thresholds measured
+  on a 2,455-season library (HIGH from 3.5 Mbps at 1080p and 11 at 4K, against 6 and 15 for films). Until TV's
+  replacement settings are saved they follow the film ones, apart from the sizes. Profiles work for TV too, with TV's
+  own target sizes. The release group lists stay shared.
+- **TV waits to be asked**: **Auto-queue TV too** is off by default, so auto-queue and Queue the biggest wins only take
+  films until it's on. Seasons picked by hand (Replace selected, Find replacements) go straight away.
+- **Flagged and Suggestions** have the Films / TV switch too (remembered), seasons link to Sonarr and show their episode
+  count, and covers use the series poster. The dashboard's scan summary has a TV part.
+- **Sonarr setup checks** with fixes, as for Radarr: qBittorrent, completed download handling, the recycle bin, the
+  Remux format and the profiles in use, size limits (Sonarr 5 keeps them on each quality in a profile, and those are
+  what's checked and set), a media server, and the webhook (`/api/webhook/sonarr`, which rereads the series within
+  seconds). The terminal UI has Sonarr's connection and setup too.
+- **Fixed**: the Low quality group was always judged against the default thresholds, not the saved ones (a variable
+  in the grouping shadowed the quality settings). It made no difference with the default thresholds.
+- **Fixed**: Sonarr gives runtimes under an hour as "mm:ss", which wasn't read (it fell back to the listed runtime).
+- A Radarr or Sonarr queue that can't be read no longer counts that app's downloads as gone from the queue.
+
 ## 1.8.0 (2026-11-13)
 
 - **Ratings out of 5**: picture and audio are each rated 0 to 5 against your thresholds (Settings → Quality), which

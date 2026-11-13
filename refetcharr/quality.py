@@ -178,6 +178,9 @@ def minutes_of(mi: dict, fallback: float = 0) -> float:
     if re.match(r"^\d+:\d+:\d+", rt):
         h, m, s = rt.split(":")[:3]
         return int(h) * 60 + int(m) + float(s) / 60
+    if re.match(r"^\d+:\d+(\.\d+)?$", rt):  # Sonarr: "mm:ss" under an hour
+        m, s = rt.split(":")
+        return int(m) + float(s) / 60
     return fallback
 
 

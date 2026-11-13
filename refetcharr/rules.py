@@ -81,11 +81,14 @@ def codec_rank(title: str, prefs: list, kind: str) -> int:
 
 
 def minutes(m: dict) -> float:
-    """Runtime from the file itself, else Radarr's listed runtime."""
+    """Runtime from the file itself ("h:mm:ss", or "mm:ss" as Sonarr gives it under an hour), else the listed runtime."""
     rt = ((m.get("movieFile") or {}).get("mediaInfo") or {}).get("runTime") or ""
     if re.match(r"^\d+:\d+:\d+", rt):
         h, mi, s = rt.split(":")[:3]
         return int(h) * 60 + int(mi) + int(s.split(".")[0]) / 60
+    if re.match(r"^\d+:\d+(\.\d+)?$", rt):
+        mi, s = rt.split(":")
+        return int(mi) + int(s.split(".")[0]) / 60
     return m.get("runtime") or 0
 
 
@@ -106,11 +109,13 @@ def mb_per_min(m: dict) -> float:
 def group(m: dict, r: dict, q: dict | None = None, cur_file: dict | None = None) -> str | None:
     """Which problem group a film's file is in (None: it's fine). `cur_file`: current(m), when it's already known."""
     f = m.get("movieFile")
+    if f and m.get("group_hint"):  # an episode replaced on its own because no season pack qualified: judged as its season was
+        return m["group_hint"]
     if not f or minutes(m) < r["min_runtime"]:
         return None
-    q = f["quality"]["quality"]
-    res, mbm = q.get("resolution") or 0, mb_per_min(m)
-    if "Remux" in q["name"]:
+    fq = f["quality"]["quality"]  # not `q`: that's the quality settings, which the Low quality check below needs
+    res, mbm = fq.get("resolution") or 0, mb_per_min(m)
+    if "Remux" in fq["name"]:
         return "remux4k" if res >= 2160 else "remux"
     if res >= 2160 and mbm > r["cap_2160"]:
         return "big4k"
@@ -258,9 +263,9 @@ def keeps(before: dict, after: dict, r: dict, upgrade: bool = False, need: dict 
             why.append(f"no better than the current file (picture {after.get('video_tier') or '?'} against "
                        f"{before.get('video_tier') or '?'}: {after.get('picture_mbps', 0):g} against {before.get('picture_mbps', 0):g} Mbps)")
     if r.get("keep_hdr", True) and before.get("hdr") and not after.get("hdr"):
-        why.append(f"would lose HDR (the film is {before['hdr']}; the release doesn't say HDR or DV)")
+        why.append(f"would lose HDR (the original is {before['hdr']}; the release doesn't say HDR or DV)")
     if r.get("keep_surround", True) and before.get("channels", 0) >= 5 and 0 < after.get("channels", 0) < 5:
-        why.append(f"stereo audio ({after['channels']:g}; the film has {before['channels']:g})")
+        why.append(f"stereo audio ({after['channels']:g}; the original has {before['channels']:g})")
     if r.get("keep_atmos") and before.get("atmos") and not after.get("atmos"):
         why.append("would lose Atmos")
     if r.get("keep_lossless") and before.get("lossless") and not after.get("lossless"):

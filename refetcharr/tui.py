@@ -75,7 +75,7 @@ class Tui:
         if s["error"]:
             info += f"\n[bold red]Problem:[/] {s['error'].strip().splitlines()[-1][:160]}"
         if s.get("setup_issues"):
-            info += f"\n[bold #ff2bd6]Radarr setup needs attention:[/] {'; '.join(s['setup_issues'])} [grey62](menu: Radarr connection and setup)[/]"
+            info += f"\n[bold #ff2bd6]Setup needs attention:[/] {'; '.join(s['setup_issues'])} [grey62](menu: Radarr / Sonarr connection and setup)[/]"
         parts = [Panel(Group(head, "", Text.from_markup(info)), title="[bold]refetcharr[/]", border_style=C["violet"], box=box.ROUNDED)]
 
         t = Table(expand=True, box=None, show_edge=False, header_style=C["dim"])
@@ -202,30 +202,42 @@ class Tui:
         if not s["summary"]:
             self.c.print("[grey62]No scan yet: choose 'Rescan the library'.[/]")
             return
-        t = Table(box=box.ROUNDED, border_style=C["mint"], header_style=C["dim"], title=f"library scan {s['at'].replace('T', ' ')}")
-        for col in ("group", "films", "space", "to win"):
-            t.add_column(col, justify="right" if col != "group" else "left")
-        for k, label in {**GROUPS, "tiny": "Tiny x265 (need bigger)"}.items():
-            v = s["summary"].get(k)
-            if v:
-                t.add_row(label, str(v["films"]), f"{v['gb'] / 1000:.1f} TB", "-" if k == "tiny" else f"{v['saving_gb'] / 1000:.1f} TB")
-        self.c.print(t)
+        for title, summary, unit in ((f"library scan {s['at'].replace('T', ' ')}", s["summary"], "films"),
+                                     ("TV", s["summary"].get("tv") or {}, "seasons")):
+            if not any(k in summary for k in GROUPS):
+                continue
+            t = Table(box=box.ROUNDED, border_style=C["mint"], header_style=C["dim"], title=title)
+            for col in ("group", unit, "space", "to win"):
+                t.add_column(col, justify="right" if col != "group" else "left")
+            for k, label in {**GROUPS, "tiny": "Tiny x265 (need bigger)"}.items():
+                v = summary.get(k)
+                if v:
+                    t.add_row(label, str(v["films"]), f"{v['gb'] / 1000:.1f} TB", "-" if k == "tiny" else f"{v['saving_gb'] / 1000:.1f} TB")
+            self.c.print(t)
 
     def radarr_setup(self) -> None:
+        self.app_setup("radarr")
+
+    def sonarr_setup(self) -> None:
+        self.app_setup("sonarr")
+
+    def app_setup(self, app: str) -> None:
+        """An app's connection and its setup checks (Radarr's or Sonarr's: the same steps)."""
+        name = app.title()
         values = api("GET", "/api/settings")["values"]
         c = values["connections"]
-        self.c.print(f"Radarr: [bold]{c['radarr_url'] or values['env']['radarr_url']}[/]   API key: "
-                     f"{'[#22f5c8]set[/]' if values['secrets_set']['radarr_api_key'] else '[#ff2bd6]not set[/]'}")
-        if Confirm.ask("Change the Radarr connection?", default=False):
-            url = Prompt.ask("Address", default=c["radarr_url"] or values["env"]["radarr_url"])
+        self.c.print(f"{name}: [bold]{c[f'{app}_url'] or values['env'][f'{app}_url']}[/]   API key: "
+                     f"{'[#22f5c8]set[/]' if values['secrets_set'][f'{app}_api_key'] else '[#ff2bd6]not set[/]'}")
+        if Confirm.ask(f"Change the {name} connection?", default=False):
+            url = Prompt.ask("Address", default=c[f"{app}_url"] or values["env"][f"{app}_url"])
             key = Prompt.ask("API key (blank keeps the saved one)", default="", password=True, show_default=False)
-            t = api("POST", "/api/connections/test", {"radarr_url": url, "radarr_api_key": key})
+            t = api("POST", "/api/connections/test", {"app": app, f"{app}_url": url, f"{app}_api_key": key})
             self.c.print(("[#22f5c8]" if t["ok"] else "[#ff2bd6]") + t["message"] + "[/]")
             if t["ok"]:
-                api("PATCH", "/api/settings", {"connections": {"radarr_url": url, "radarr_api_key": key}})
+                api("PATCH", "/api/settings", {"connections": {f"{app}_url": url, f"{app}_api_key": key}})
                 self.c.print("Saved.")
-        checks = api("GET", "/api/setup")["checks"]
-        t = Table(box=box.ROUNDED, border_style=C["violet"], header_style=C["dim"], title="Radarr setup")
+        checks = api("GET", f"/api/setup?app={app}")["checks"]
+        t = Table(box=box.ROUNDED, border_style=C["violet"], header_style=C["dim"], title=f"{name} setup")
         t.add_column("", width=2)
         t.add_column("check")
         t.add_column("detail", style=C["dim"])
@@ -234,8 +246,8 @@ class Tui:
             t.add_row(icon, x["label"], x["detail"] + (f"\n[#22d3ee]Fix: {x['fix']}[/]" if x["fix"] else ""))
         self.c.print(t)
         fixes = [x for x in checks if x["fix"]]
-        if fixes and Confirm.ask(f"Apply the {len(fixes)} fix(es) listed? This changes Radarr's settings", default=False):
-            r = api("POST", "/api/setup/fix", {"ids": [x["id"] for x in fixes]})
+        if fixes and Confirm.ask(f"Apply the {len(fixes)} fix(es) listed? This changes {name}'s settings", default=False):
+            r = api("POST", "/api/setup/fix", {"ids": [x["id"] for x in fixes], "app": app})
             self.c.print("\n".join(f"[#22f5c8]✓[/] {d}" for d in r["done"]) or "Nothing needed changing.")
 
     def rules(self) -> None:
@@ -253,7 +265,7 @@ MENU = [
     ("Auto-queue on / off", "toggle_auto"), ("Pause / resume", "pause_resume"), ("Limits: at once and per day", "limits"),
     ("Which kinds of win to go after", "groups"), ("Schedule (days and hours)", "window"), ("Films not replaced: retry", "failed"),
     ("Oversized films in the library", "oversized"), ("Rescan the library", "scan"), ("Rules: seeders and sizes", "rules"),
-    ("Radarr connection and setup", "radarr_setup"),
+    ("Radarr connection and setup", "radarr_setup"), ("Sonarr connection and setup (TV)", "sonarr_setup"),
 ]
 
 

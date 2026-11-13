@@ -7,6 +7,24 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const size = (b) => { const g = (b || 0) / 1e9; return g >= 1000 ? `${(g / 1000).toFixed(2)} TB` : `${g.toFixed(1)} GB`; };
 let pageVersion = null;   // the server's version this page was loaded with
+// 1.9.0: films (Radarr) and TV seasons and episodes (Sonarr). Pages with a Films / TV switch remember it; it shows once Sonarr is connected.
+const KIND_KEY = "refetcharr-kind-";
+const isTv = (x) => x?.kind === "season" || x?.kind === "episode";
+function kindOf(page) {
+  if (status && !status.tv) return "films";
+  try { return localStorage.getItem(KIND_KEY + page) || "films"; } catch { return "films"; }
+}
+const ofKind = (page) => (x) => (kindOf(page) === "tv") === isTv(x);
+const linkBase = (k) => (status?.[k] || "").replace(/\/$/, "");
+const itemLink = (x) => (!x?.slug ? "" : isTv(x) ? `${linkBase("sonarr_link")}/series/${encodeURIComponent(x.slug)}` : `${linkBase("radarr_link")}/movie/${encodeURIComponent(x.slug)}`);
+const epCount = (x) => (x?.kind === "season" && x.episodes ? ` <span class="muted small">${x.episodes} ep${x.episodes === 1 ? "" : "s"}</span>` : "");
+function paintKinds() {
+  const on = !!status?.tv;
+  document.querySelectorAll("[data-kind-for]").forEach((g) => {
+    g.hidden = !on; const bar = g.closest(".kindbar"); if (bar) bar.hidden = !on;
+    g.querySelectorAll("[data-kind]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.kind === kindOf(g.dataset.kindFor)));
+  });
+}
 let status = null, films = [], libSort = ["saving_gb", -1], libShown = 200, settings = null;
 
 // What this browser has already seen, so the tabs can badge what's new (like Radarr's and Sonarr's counts).
@@ -32,7 +50,9 @@ function badges() {
   set("b-failed", newFail, `${newFail} new since you last looked`);
   set("b-replaced", newDone, `${newDone} new since you last looked`);
   set("b-library", status.scan.at && status.scan.at !== seen.scan ? 1 : 0);
-  set("b-radarr", status.setup_issues.length, status.setup_issues.join("; "));
+  const issues = (a) => status.setup_apps?.[a] || [];
+  set("b-radarr", issues("radarr").length, issues("radarr").join("; "));
+  set("b-sonarr", issues("sonarr").length, issues("sonarr").join("; "));
   set("b-suggestions", status.suggestions || 0, `${status.suggestions} film(s) with replacements to pick from`);
   document.title = (newFail ? `(${newFail}) ` : "") + "Refetcharr";
   rollUp();
@@ -82,9 +102,9 @@ const recheck = (id) => tracked.get(id).check();
 
 // ── tabs ──────────────────────────────────────────────────────────────────
 const TAB_GROUP = { dashboard: "dashboard", library: "library", suggestions: "library", replaced: "activity", failed: "activity", events: "activity",
-  replacement: "settings", quality: "settings", queue: "settings", radarr: "settings", timings: "settings", security: "settings" };
-const TAB_TITLE = { dashboard: "Dashboard", library: "Flagged films", suggestions: "Suggestions", replaced: "Replaced", failed: "Not replaced", events: "Events",
-  replacement: "Replacement", quality: "Quality", queue: "Queue & schedule", radarr: "Radarr", timings: "Timings", security: "Security" };
+  replacement: "settings", quality: "settings", queue: "settings", radarr: "settings", sonarr: "settings", timings: "settings", security: "settings" };
+const TAB_TITLE = { dashboard: "Dashboard", library: "Flagged", suggestions: "Suggestions", replaced: "Replaced", failed: "Not replaced", events: "Events",
+  replacement: "Replacement", quality: "Quality", queue: "Queue & schedule", radarr: "Radarr", sonarr: "Sonarr", timings: "Timings", security: "Security" };
 const currentTab = () => { const t = (location.hash || "#dashboard").slice(1); return t === "settings" ? "radarr" : TAB_GROUP[t] ? t : "dashboard"; };
 function showTab() {
   const tab = currentTab();
@@ -94,7 +114,7 @@ function showTab() {
   $("page-title").textContent = TAB_TITLE[tab];
   closeMenu();
   if (tab === "library") loadFilms();
-  if (["queue", "radarr", "timings", "security"].includes(tab)) loadSettings();
+  if (["queue", "radarr", "sonarr", "timings", "security"].includes(tab)) loadSettings();
   if (tab === "replacement") loadRules();
   if (tab === "quality") loadQuality();
   if (tab === "events") loadEvents();
@@ -153,7 +173,8 @@ async function refresh() {
   const problem = shortError(s.error);
   let dismissed = ""; try { dismissed = sessionStorage.getItem("refetcharr-dismissed") || ""; } catch { /* private window */ }
   $("error").hidden = !problem || problem === dismissed;
-  $("error").innerHTML = problem ? `<span>Problem: ${esc(problem)}${/API key|reach Radarr/.test(problem) ? ' · <a href="#radarr">Open Settings → Radarr</a>' : ""}</span>
+  const fixAt = /Sonarr/.test(problem) ? "sonarr" : /API key|reach Radarr|Radarr/.test(problem) ? "radarr" : "";
+  $("error").innerHTML = problem ? `<span>Problem: ${esc(problem)}${fixAt ? ` · <a href="#${fixAt}">Open Settings → ${fixAt === "sonarr" ? "Sonarr" : "Radarr"}</a>` : ""}</span>
     <button type="button" class="x" id="error-x" aria-label="Dismiss">✕</button>` : "";
 
   $("active").innerHTML = s.active.length ? s.active.sort((a, b) => (b.stalled - a.stalled) || (b.finish_warn - a.finish_warn) || (b.progress ?? -1) - (a.progress ?? -1)).map((a) => {
@@ -174,12 +195,17 @@ async function refresh() {
 
   const sum = s.scan.summary || {};
   $("scan-at").textContent = s.scan.at ? `· ${s.scan.at.replace("T", " ")}` : "· not scanned yet";
-  $("scan-summary").innerHTML = Object.entries(GROUPS).filter(([k]) => sum[k]).map(([k, [label, col]]) =>
-    `<div class="group" style="--c:${col}"><b>${label}</b><span>${sum[k].films} films · ${(sum[k].gb / 1000).toFixed(1)} TB</span>
-     <span>${k === "tiny" ? `need bigger files${s.groups?.tiny ? " · going after them" : " · switched off"}` : `about ${(sum[k].saving_gb / 1000).toFixed(1)} TB to win`}</span></div>`).join("")
-    || `<p class="empty">Run a scan to see the library's oversized films.</p>`;
+  const tiles = (sm, unit, groups) => Object.entries(GROUPS).filter(([k]) => sm?.[k]).map(([k, [label, col]]) =>
+    `<div class="group" style="--c:${col}"><b>${label}</b><span>${sm[k].films} ${unit} · ${(sm[k].gb / 1000).toFixed(1)} TB</span>
+     <span>${k === "tiny" ? `need bigger files${groups?.tiny ? " · going after them" : " · switched off"}` : `about ${(sm[k].saving_gb / 1000).toFixed(1)} TB to win`}</span></div>`).join("");
+  const filmTiles = tiles(sum, "films", s.groups), tvTiles = s.tv && sum.tv ? tiles(sum.tv, "seasons", s.tv_groups) : "";
+  $("scan-summary").innerHTML = (filmTiles && tvTiles ? `<h3 class="groups-h">Films</h3>` : "") + filmTiles
+    + (tvTiles ? `<h3 class="groups-h">TV${s.tv_auto ? "" : ' <span class="muted small">· picked by hand only (Auto-queue TV is off)</span>'}</h3>${tvTiles}` : "")
+    + (s.tv && !s.tv_scanned ? `<p class="muted small groups-h">TV shows here after the next rescan.</p>` : "")
+    || `<p class="empty">Run a scan to see the library's oversized films${s.tv ? " and seasons" : ""}.</p>`;
 
   $("active-count").textContent = s.active.length ? `· ${s.active.length - s.stalled} of ${s.limits.max_active} at once${s.stalled ? `, ${s.stalled} stalled` : ""}` : "";
+  paintKinds();
   renderFailed(); loadReplaced(); if (currentTab() === "suggestions") loadSuggestions(true);
   const tab = currentTab();
   if (tab === "failed" || tab === "replaced" || tab === "library") markSeen(tab); else badges();
@@ -266,7 +292,8 @@ function shownFilms() {
   const [k, dir] = libSort;
   const showIgnored = $("lib-ignored").checked;
   const fr = $("lib-f-rating").value, fres = $("lib-f-res").value, fhdr = $("lib-f-hdr").value, fat = $("lib-f-atmos").value;
-  return films.filter((f) => libGroups.has(f.group) && (!q || f.title.toLowerCase().includes(q)) && (!untried || !f.refetch) && (showIgnored || !f.ignored)
+  const kind = ofKind("lib");
+  return films.filter((f) => kind(f) && libGroups.has(f.group) && (!q || f.title.toLowerCase().includes(q)) && (!untried || !f.refetch) && (showIgnored || !f.ignored)
       && (!fr || f.badge === fr) && (!fres || resKey(f.resolution) === fres)
       && (!fhdr || (f.dynamic_range && f.dynamic_range !== "SDR" ? "1" : "0") === fhdr) && (!fat || (f.atmos ? "1" : "0") === fat))
     .sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * dir);
@@ -277,7 +304,7 @@ function filmCover(f) {
   return `<div class="cover ${f.ignored ? "ignored" : ""}" data-id="${f.id}">
     ${canPick ? `<label class="cover-sel" title="Select"><input type="checkbox" value="${f.id}" data-ignored="${f.ignored ? 1 : ""}" aria-label="Select ${esc(f.title)}"></label>` : ""}
     <button type="button" class="cover-img" data-open-film="${f.id}" aria-label="Details of ${esc(f.title)}">${poster(f)}</button>
-    <div class="cover-meta"><b class="cover-title">${esc(f.title)}</b> <span class="yr">${f.year || ""}</span>
+    <div class="cover-meta"><b class="cover-title">${esc(f.title)}</b> <span class="yr">${f.year || ""}</span>${epCount(f)}
       <div class="cover-line">${rp(f)}<span>${f.size_gb.toFixed(1)} GB</span><span>${resLabel(f.resolution)}</span></div>
       <div class="cover-line"><span class="tag" style="--c:${col}">${label}</span>${savingCell(f)}${f.refetch ? `<span class="tag">${esc(f.refetch)}</span>` : ""}</div></div>
   </div>`;
@@ -288,17 +315,19 @@ function renderFilms() {
   $("lib-grid").innerHTML = covers ? v.slice(0, libShown).map(filmCover).join("") || `<p class="empty">No films match.</p>` : "";
   $("lib-rows").innerHTML = covers ? "" : v.slice(0, libShown).map((f) => {
     const [label, col] = GROUPS[f.group] || [f.group, "var(--line)"], canPick = !f.refetch;
-    const link = `${(status?.radarr_link || "").replace(/\/$/, "")}/movie/${encodeURIComponent(f.slug)}`;
+    const link = itemLink(f);
     return xrow("lib-rows", f.id, `<td class="pick">${canPick ? `<input type="checkbox" value="${f.id}" data-ignored="${f.ignored ? 1 : ""}" aria-label="Select ${esc(f.title)}">` : ""}</td>
-      <td><a href="${esc(link)}" target="_blank" rel="noopener">${esc(f.title)}</a><span class="yr">${f.year || ""}</span>${f.release_group ? `<span class="rg">${esc(f.release_group)}</span>` : ""}</td>
+      <td><a href="${esc(link)}" target="_blank" rel="noopener">${esc(f.title)}</a><span class="yr">${f.year || ""}</span>${epCount(f)}${f.release_group ? `<span class="rg">${esc(f.release_group)}</span>` : ""}${f.mixed ? ' <span class="tag" title="Its episodes are in more than one quality: the one most of its size is in is shown">mixed</span>' : ""}</td>
       <td><span class="tag" style="--c:${col}">${label}</span></td><td>${esc(f.quality)} · ${esc(f.video_codec)}${f.dynamic_range && f.dynamic_range !== "SDR" ? " · " + esc(f.dynamic_range) : ""}${f.audio ? ` · ${esc(audioLabel(f.audio))} ${chans(f.channels)}${f.atmos ? " Atmos" : ""}` : ""}</td>
       <td>${rp(f)}</td>
       <td class="r">${f.size_gb.toFixed(1)} GB</td><td class="r">${f.mb_per_min}</td>
       <td class="r">${f.group === "tiny" ? `<span class="grew" title="Needs a bigger file">+${(-f.saving_gb).toFixed(1)} GB</span>` : f.saving_gb > 0 ? f.saving_gb.toFixed(1) + " GB" : "–"}</td>
       <td>${f.refetch ? `<span class="tag">${esc(f.refetch)}</span>` : ""}${f.ignored ? `<span class="tag" title="${esc(f.ignored)}">Ignored</span>` : ""}</td>`, f.ignored ? "ignored" : "");
-  }).join("") || `<tr><td colspan="9" class="empty">No films match.</td></tr>`;
+  }).join("") || `<tr><td colspan="9" class="empty">No ${kindOf("lib") === "tv" ? "seasons" : "films"} match.${kindOf("lib") === "tv" && status?.tv && !status.tv_scanned ? " TV is listed after the next rescan." : ""}</td></tr>`;
   const save = v.filter((f) => f.group !== "tiny").reduce((t, f) => t + Math.max(f.saving_gb, 0), 0);
-  $("lib-count").textContent = `${v.length.toLocaleString()} films · about ${(save / 1000).toFixed(1)} TB to win`;
+  const tvNow = kindOf("lib") === "tv";
+  $("lib-th-title").textContent = tvNow ? "Season" : "Film";
+  $("lib-count").textContent = `${v.length.toLocaleString()} ${tvNow ? "seasons" : "films"} · about ${(save / 1000).toFixed(1)} TB to win`;
   $("lib-more").hidden = v.length <= libShown;
   document.querySelectorAll("#tab-library th[data-sort]").forEach((th) => { th.classList.toggle("sorted", th.dataset.sort === libSort[0]); th.classList.toggle("asc", th.dataset.sort === libSort[0] && libSort[1] > 0); });
   updateLibQueue();
@@ -313,16 +342,20 @@ function updateLibQueue() {
 }
 
 // ── 1.7.0: profiles and what a selection would save ───────────────────────
-let profiles = null, liveRules = null, estWith = "current";
+let profiles = null, liveRules = null, liveTvRules = null, estWith = "current";
 async function loadProfiles(force) {
   if (profiles && !force) return;
   try {
     const [p, s] = await Promise.all([api("GET", "/api/profiles"), api("GET", "/api/settings")]);
-    profiles = p; liveRules = s.values.rules;
+    profiles = p; liveRules = s.values.rules; liveTvRules = s.values.tv.rules;
   } catch { /* the estimate waits for the next try */ }
 }
 const profileLabel = (id) => (id === "custom" ? "Custom" : profiles?.profiles.find((p) => p.id === id)?.label || id);
-const rulesFor = (id) => (id === "current" ? liveRules : { ...liveRules, ...(profiles.profiles.find((p) => p.id === id)?.rules || {}) });
+// a profile's rules on top of the saved ones, for films or for TV (its targets differ)
+const rulesFor = (id, tv = false) => {
+  const live = tv ? liveTvRules : liveRules, list = tv ? profiles.tv_profiles : profiles.profiles;
+  return id === "current" ? live : { ...live, ...(list.find((p) => p.id === id)?.rules || {}) };
+};
 const pickOf = (sg) => sg.options.find((o) => o.guid === sg.chosen) || sg.options[0];
 function estAfterGb(f, r) {   // what a replacement would likely weigh: the profile's target size, within its rules
   const k = f.resolution >= 2000 ? 2160 : 1080, mins = f.runtime_min || 0;
@@ -351,19 +384,21 @@ function renderLibEst() {
   const box = $("lib-est"), ids = new Set(libPicked().map((i) => +i.value));
   if (!ids.size) { box.hidden = true; return; }
   if (!liveRules) { loadProfiles().then(() => { if (liveRules) renderLibEst(); }); loadSuggestions(true); return; }
-  const r = rulesFor(estWith), sel = films.filter((f) => ids.has(f.id));
+  const sel = films.filter((f) => ids.has(f.id));
   let now = 0, after = 0, freed = 0, added = 0, real = 0;
   const ratingsBefore = [], ratingsAfter = [];
   for (const f of sel) {
     const sg = estWith === "current" ? sugg.find((s) => s.id === f.id && s.options.length) : null, pick = sg && pickOf(sg);
-    const a = pick ? pick.size / 1e9 : estAfterGb(f, r);
+    const a = pick ? pick.size / 1e9 : estAfterGb(f, rulesFor(estWith, isTv(f)));
     if (pick) { real++; if (f.rating != null && pick.rating != null) { ratingsBefore.push(f.rating); ratingsAfter.push(pick.rating); } }
     now += f.size_gb; after += a;
     if (a < f.size_gb) freed += f.size_gb - a; else added += a - f.size_gb;
   }
   const basis = real === sel.length ? "Sizes after are the releases found." : real ? `${real} from releases found under Suggestions, ${sel.length - real} estimated from the target size.` : "Estimated from the target size: find replacements for real release sizes.";
-  const opts = [["current", `Your settings (${profileLabel(profiles.current)})`], ...profiles.profiles.filter((p) => p.id !== profiles.current).map((p) => [p.id, p.label])];
-  box.innerHTML = estTiles({ what: sel.length === 1 ? "Film selected" : "Films selected", n: sel.length, now, after, freed, added, real: real === sel.length, ratingsBefore, ratingsAfter })
+  const cur = kindOf("lib") === "tv" ? profiles.current_tv : profiles.current_films;
+  const opts = [["current", `Your settings (${profileLabel(cur)})`], ...profiles.profiles.filter((p) => p.id !== cur).map((p) => [p.id, p.label])];
+  const unit = kindOf("lib") === "tv" ? ["Season selected", "Seasons selected"] : ["Film selected", "Films selected"];
+  box.innerHTML = estTiles({ what: sel.length === 1 ? unit[0] : unit[1], n: sel.length, now, after, freed, added, real: real === sel.length, ratingsBefore, ratingsAfter })
     + `<div class="est-foot"><span class="muted small">${basis}</span>
       <label class="est-with">Estimate with <select id="est-with">${opts.map(([v, l]) => `<option value="${v}" ${v === estWith ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label></div>`;
   box.hidden = false;
@@ -372,15 +407,17 @@ $("lib-est").addEventListener("change", (e) => { if (e.target.id === "est-with")
 async function loadProfileCards() {
   await loadProfiles(true);
   if (!profiles) return;
-  $("profiles").innerHTML = profiles.profiles.map((p) => `<button type="button" class="profile" role="radio" aria-checked="${p.id === profiles.current}" data-profile="${p.id}">
+  const tv = kindOf("rules") === "tv", cur = tv ? profiles.current_tv : profiles.current_films;
+  $("profiles").innerHTML = profiles.profiles.map((p) => `<button type="button" class="profile" role="radio" aria-checked="${p.id === cur}" data-profile="${p.id}">
       <b>${esc(p.label)}</b><span>${esc(p.blurb)}</span></button>`).join("")
-    + (profiles.current === "custom" ? `<p class="muted small profiles-note">Custom: your settings don't match a profile. Pick one to start from it.</p>` : "");
+    + (cur === "custom" ? `<p class="muted small profiles-note">Custom: your ${tv ? "TV " : ""}settings don't match a profile. Pick one to start from it.</p>` : "")
+    + (tv ? `<p class="muted small profiles-note">For TV a profile's target sizes are TV's own (Balanced: 35 MB/min at 1080p, 90 at 4K).</p>` : "");
 }
 $("profiles").addEventListener("click", (e) => {
   const b = e.target.closest("[data-profile]");
   if (!b || b.getAttribute("aria-checked") === "true") return;
   if (!tracked.get("rules").btn.disabled && !confirm("Picking a profile saves it now and drops the unsaved changes on this page. Carry on?")) return;
-  act(async () => { const r = await api("POST", "/api/profile", { id: b.dataset.profile }); estWith = "current"; await loadRules(); return r; });
+  act(async () => { const r = await api("POST", "/api/profile", { id: b.dataset.profile, kind: kindOf("rules") }); estWith = "current"; await loadRules(); return r; });
 });
 $("lib-rows").addEventListener("change", updateLibQueue);
 $("lib-grid").addEventListener("change", updateLibQueue);
@@ -428,7 +465,16 @@ async function loadSettings() {
   c.radarr_api_key.value = "";
   c.radarr_api_key.placeholder = settings.secrets_set.radarr_api_key ? "Saved: leave blank to keep it" : "Paste Radarr's API key";
   $("conn-key-note").textContent = settings.secrets_set.radarr_api_key && !settings.connections.radarr_api_key && settings.env.radarr_api_key ? "Currently from the container's .env" : "";
-  loadSetup();
+  const sc = $("sconn");
+  sc.sonarr_url.value = conn.sonarr_url || ""; sc.sonarr_url.placeholder = settings.env.sonarr_url;
+  $("sconn-url-note").textContent = conn.sonarr_url ? "" : `Blank uses ${settings.env.sonarr_url} (from the container's .env)`;
+  sc.sonarr_link.value = conn.sonarr_link || "";
+  $("sconn-link-note").textContent = conn.sonarr_link ? "" : `Blank uses the address above (${conn.sonarr_url || settings.env.sonarr_url})`;
+  sc.sonarr_api_key.value = "";
+  sc.sonarr_api_key.placeholder = settings.secrets_set.sonarr_api_key ? "Saved: leave blank to keep it" : "Paste Sonarr's API key";
+  $("sconn-key-note").textContent = settings.secrets_set.sonarr_api_key && !conn.sonarr_api_key && settings.env.sonarr_api_key ? "Currently from the container's .env" : "";
+  sc.tv_enabled.checked = settings.tv.enabled;
+  if (currentTab() === "radarr" || currentTab() === "sonarr") loadSetup(false, currentTab());
   const f = $("settings"), q = settings.queue;
   f.auto.checked = q.auto; f.max_active.value = q.max_active; f.max_per_day.value = q.max_per_day;
   f.w_enabled.checked = q.window.enabled; f.w_start.value = q.window.start; f.w_end.value = q.window.end;
@@ -438,7 +484,7 @@ async function loadSettings() {
   const sec = $("security");
   sec.username.value = settings.auth.username; sec.password.value = sec.confirm.value = sec.current.value = "";
   $("apikey").textContent = "••••••••••••••••••••••••••••••••"; $("key-show").textContent = "Show";
-  for (const id of ["conn", "settings", "timing", "security"]) clean(id);
+  for (const id of ["conn", "sconn", "settings", "timing", "security"]) clean(id);
 }
 $("security").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -456,7 +502,7 @@ $("key-show").addEventListener("click", async () => {
 });
 $("key-new").addEventListener("click", async () => {
   if (!confirm("Make a new API key? Scripts using the old one stop working (the terminal UI picks up the new one by itself).")) return;
-  try { $("apikey").textContent = (await api("POST", "/api/auth/key")).api_key; $("key-show").textContent = "Hide"; say("key-msg", "New key made. Fix the webhook under Settings → Radarr so Radarr uses it."); }
+  try { $("apikey").textContent = (await api("POST", "/api/auth/key")).api_key; $("key-show").textContent = "Hide"; say("key-msg", "New key made. Fix the webhooks under Settings → Radarr and Settings → Sonarr so they use it."); }
   catch (err) { say("key-msg", err.message, "err"); }
 });
 $("logout").addEventListener("click", async () => { await fetch("/api/auth/logout", { method: "POST" }); location.replace("/login"); });
@@ -488,25 +534,51 @@ $("conn").addEventListener("submit", async (e) => {
     connResult(true, "Saved. " + t.message); await loadSettings(); refresh();
   } catch (err) { connResult(false, err.message); }
 });
-let setupChecks = [];
-async function loadSetup(force) {
-  try { setupChecks = (await api("GET", "/api/setup")).checks; } catch (e) { $("setup").innerHTML = `<li class="empty">${esc(e.message)}</li>`; return; }
-  $("setup").innerHTML = setupChecks.map((c) => {
+// Sonarr's connection (1.9.0): the same as Radarr's, plus whether TV is looked after at all
+const sconnBody = () => ({ app: "sonarr", sonarr_url: $("sconn").sonarr_url.value.trim(), sonarr_api_key: $("sconn").sonarr_api_key.value.trim() });
+const sconnResult = (ok, msg) => say("sconn-result", msg, ok === null ? "info" : ok ? "ok" : "err");
+$("sconn-test").addEventListener("click", async () => {
+  sconnResult(null, "Testing…");
+  try { const r = await api("POST", "/api/connections/test", sconnBody()); sconnResult(r.ok, r.message); } catch (e) { sconnResult(false, e.message); }
+});
+$("sconn").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = $("sconn"), { app: _, ...conn } = sconnBody();
+  try {
+    let msg = "Saved.";
+    if (f.tv_enabled.checked) {
+      const t = await api("POST", "/api/connections/test", sconnBody());
+      if (!t.ok) return sconnResult(false, t.message + " (not saved)");
+      msg = `Saved. ${t.message}. TV shows on the pages after the next rescan.`;
+    }
+    await api("PATCH", "/api/settings", { connections: { ...conn, sonarr_link: f.sonarr_link.value.trim() }, tv: { enabled: f.tv_enabled.checked } });
+    sconnResult(true, msg); await loadSettings(); refresh();
+  } catch (err) { sconnResult(false, err.message); }
+});
+const SETUP_BOX = { radarr: ["setup", "setup-fix-all"], sonarr: ["ssetup", "ssetup-fix-all"] };
+let setupChecks = { radarr: [], sonarr: [] };
+async function loadSetup(force, app = "radarr") {
+  const [list, fixAll] = SETUP_BOX[app];
+  try { setupChecks[app] = (await api("GET", `/api/setup?app=${app}`)).checks; } catch (e) { $(list).innerHTML = `<li class="empty">${esc(e.message)}</li>`; return; }
+  $(list).innerHTML = setupChecks[app].map((c) => {
     const cls = c.ok ? "ok" : c.level, icon = c.ok ? "✓" : c.level === "warn" ? "!" : "✕";
     return `<li><span class="icon ${cls}" aria-label="${c.ok ? "OK" : "Needs attention"}">${icon}</span><b>${esc(c.label)}</b>
       ${c.fix ? `<button type="button" class="btn" data-fix="${c.id}">Fix</button>` : "<span></span>"}
       <span class="detail">${esc(c.detail)}</span>${c.fix ? `<span class="fixdesc">Fix: ${esc(c.fix)}</span>` : ""}</li>`;
   }).join("");
-  $("setup-fix-all").hidden = setupChecks.filter((c) => c.fix).length < 2;
+  $(fixAll).hidden = setupChecks[app].filter((c) => c.fix).length < 2;
   if (force) refresh();
 }
-async function applyFix(ids) {
-  try { const r = await api("POST", "/api/setup/fix", { ids }); toast(r.done.length ? r.done.join(". ") + "." : "Nothing needed changing."); await loadSetup(true); }
+async function applyFix(ids, app) {
+  try { const r = await api("POST", "/api/setup/fix", { ids, app }); toast(r.done.length ? r.done.join(". ") + "." : "Nothing needed changing."); await loadSetup(true, app); }
   catch (e) { toast(e.message, "err"); }
 }
-$("setup").addEventListener("click", (e) => { const b = e.target.closest("[data-fix]"); if (b) { b.disabled = true; applyFix([b.dataset.fix]); } });
-$("setup-fix-all").addEventListener("click", () => applyFix(setupChecks.filter((c) => c.fix).map((c) => c.id)));
-$("setup-refresh").addEventListener("click", () => loadSetup(true));
+for (const app of ["radarr", "sonarr"]) {
+  const [list, fixAll] = SETUP_BOX[app], p = app === "sonarr" ? "s" : "";
+  $(list).addEventListener("click", (e) => { const b = e.target.closest("[data-fix]"); if (b) { b.disabled = true; applyFix([b.dataset.fix], app); } });
+  $(fixAll).addEventListener("click", () => applyFix(setupChecks[app].filter((c) => c.fix).map((c) => c.id), app));
+  $(`${p}setup-refresh`).addEventListener("click", () => loadSetup(true, app));
+}
 $("set-days").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (b) b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true"); });
 function settingsPatch() {
   const f = $("settings"), num = (n) => Number(f[n].value);
@@ -620,15 +692,20 @@ for (const k of Object.keys(igLists)) {
   box.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches(".other")) { e.preventDefault(); add(); } });
 }
 async function renderIgnoredFilms(ids) {
-  if (!ids.length) { $("ig-films").innerHTML = `<p class="muted small">None. Pick films in Oversized films and press Ignore selected.</p>`; return; }
+  if (!ids.length) { $("ig-films").innerHTML = `<p class="muted small">None. Pick films or seasons under Flagged and press Ignore selected.</p>`; return; }
   if (!films.length) { try { films = await api("GET", "/api/films"); } catch { /* names fall back to ids */ } }
-  const name = (id) => { const f = films.find((x) => x.id === id); return f ? `${esc(f.title)} <span class="yr">${f.year || ""}</span>` : `Radarr film ${id}`; };
+  const name = (id) => { const f = films.find((x) => x.id === id); return f ? `${esc(f.title)} <span class="yr">${f.year || ""}</span>` : id >= 1e9 ? `TV item ${id}` : `Radarr film ${id}`; };
   $("ig-films").innerHTML = `<ul class="iglist">${ids.map((id) => `<li><span>${name(id)}</span><button type="button" class="btn ghost" data-unignore="${id}">Stop ignoring</button></li>`).join("")}</ul>`;
 }
 $("ig-films").addEventListener("click", (e) => { const b = e.target.closest("[data-unignore]"); if (b) act(async () => { const r = await api("POST", "/api/ignore", { ids: [+b.dataset.unignore], ignore: false }); loadRules(); return r; }); });
 
-function fillRules(r, groups, ig) {
-  const f = $("rules");
+function fillRules(r, groups, ig, tv) {
+  const f = $("rules"), isTvPage = kindOf("rules") === "tv";
+  $("tv-card").hidden = !isTvPage;
+  $("groups-note").textContent = isTvPage ? "Which kinds of season Refetcharr looks for replacements for (by their sizes and ratings under TV's settings)."
+    : "Which kinds of film Refetcharr looks for replacements for.";
+  $("rules-kind-note").textContent = isTvPage ? "TV's own rules: everything on this page but the leave-alone lists applies to TV only." : "The rules for films. TV has its own: switch to TV.";
+  if (tv) { f.tv_auto.checked = tv.auto; f.tv_fallback.checked = tv.episode_fallback; }
   $("set-groups").innerHTML = GROUP_KEYS.map((k) =>
     `<label class="switch"><input type="checkbox" name="g_${k}" ${groups[k] ? "checked" : ""}><span>${GROUPS[k][0]}${GROUP_NOTE[k] ? ` <small>${GROUP_NOTE[k]}</small>` : ""}</span></label>`).join("");
   if (ig) { for (const k of Object.keys(igLists)) { igLists[k] = [...ig[k]]; renderTags(k); } renderIgnoredFilms(ig.films); }
@@ -642,11 +719,12 @@ async function loadRules() {
   try {
     const d = await api("GET", "/api/settings");
     catalog = d.catalog; ruleDefaults = d.defaults;
-    fillRules(d.values.rules, d.values.queue.groups, d.values.ignore); clean("rules");
+    const tv = kindOf("rules") === "tv";
+    fillRules(tv ? d.values.tv.rules : d.values.rules, tv ? d.values.tv.groups : d.values.queue.groups, d.values.ignore, d.values.tv); clean("rules");
   } catch (e) { toast(e.message, "err"); }
   loadProfileCards();
 }
-$("rules-reset").addEventListener("click", () => { fillRules(ruleDefaults.rules, ruleDefaults.queue.groups); say("rules-saved", "Defaults filled in (the leave-alone lists are kept). Nothing changes until you save.", "info"); recheck("rules"); });
+$("rules-reset").addEventListener("click", () => { const tv = kindOf("rules") === "tv"; fillRules(tv ? ruleDefaults.tv.rules : ruleDefaults.rules, tv ? ruleDefaults.tv.groups : ruleDefaults.queue.groups, null, tv ? ruleDefaults.tv : null); say("rules-saved", "Defaults filled in (the leave-alone lists are kept). Nothing changes until you save.", "info"); recheck("rules"); });
 function rulesPatch() {
   const f = $("rules"), r = {};
   for (const [name, [, , write]] of Object.entries(RANGES)) r[name] = write ? write(+f[name].value) : +f[name].value;
@@ -654,13 +732,15 @@ function rulesPatch() {
   document.querySelectorAll("#sizes .qs").forEach((box) => box.querySelectorAll("input[type=range]").forEach((i) => { r[`${i.dataset.k}_${box.dataset.res}`] = +i.value; }));
   for (const kind of ["video", "audio"]) { r[`${kind}_codecs`] = codecLists[kind]; r[`${kind}_strict`] = strict[kind] && codecLists[kind].length > 0; }
   const groups = Object.fromEntries(GROUP_KEYS.map((k) => [k, f[`g_${k}`]?.checked ?? false]));
-  return { rules: r, queue: { groups }, ignore: { file_groups: [...igLists.file_groups], release_groups: [...igLists.release_groups] } };
+  const ignore = { file_groups: [...igLists.file_groups], release_groups: [...igLists.release_groups] };
+  if (kindOf("rules") === "tv") return { tv: { rules: r, groups, auto: f.tv_auto.checked, episode_fallback: f.tv_fallback.checked }, ignore };
+  return { rules: r, queue: { groups }, ignore };
 }
 $("rules").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
     await api("PATCH", "/api/settings", rulesPatch());
-    say("rules-saved", "Saved. New searches use these now; the Oversized list follows at the next rescan."); clean("rules");
+    say("rules-saved", `Saved${kindOf("rules") === "tv" ? " for TV" : ""}. New searches use these now; the Flagged list follows at the next rescan.`); clean("rules");
     refresh(); loadProfileCards();
   } catch (err) { say("rules-saved", err.message, "err"); }
 });
@@ -798,7 +878,7 @@ function cardsFor(cols, d, done) {
 }
 function renderDetail(d) {
   const st = d.state || {}, dec = st.decision || {}, legacy = st.status && !st.decision;
-  const link = d.slug ? `${(status?.radarr_link || "").replace(/\/$/, "")}/movie/${encodeURIComponent(d.slug)}` : "";
+  const link = itemLink(d);
   const done = st.status === "replaced";
   // until a film is replaced, the file on disk is the original
   const before = dec.before || (legacy && done ? { quality: st.old_quality, size: st.old_size } : d.now || { quality: st.old_quality, size: st.old_size });
@@ -821,9 +901,10 @@ function renderDetail(d) {
     <div class="dd-head"><b>${esc(d.title || "")} <span class="yr">${d.year || ""}</span></b>
       ${st.status ? `<span class="tag">${esc(st.status)}</span>` : `<span class="tag">not tried yet</span>`}
       ${st.grabbed ? `<span class="muted small">${st.status === "no release" ? "searched" : "grabbed"} ${esc(st.grabbed)}</span>` : ""}
-      ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open in Radarr ↗</a>` : ""}</div>
+      ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open in ${isTv(d) ? "Sonarr" : "Radarr"} ↗</a>` : ""}</div>
     ${dec.flagged || d.flagged_now ? `<p class="dd-flag"><b>Flagged</b>${esc(dec.flagged || d.flagged_now)}</p>` : ""}
     ${st.problem ? `<p class="problem">${esc(st.problem)}</p>` : ""}
+    ${fallbackList(d)}
     ${cardsFor(cols, d, done)}
     <div class="cmpbox"><table class="cmp"><thead><tr><th></th>${cols.map(([h]) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
     ${need.length ? `<p class="note">A replacement must keep: <b>${need.join(", ")}</b> (checked on the title, then on the downloaded file).</p>` : ""}
@@ -837,6 +918,16 @@ function renderDetail(d) {
       ${done ? `<button type="button" class="btn" data-requeue="${d.id}">Replace again</button>` : ""}</div>
     ${legacy ? `<p class="note">${done ? "Replaced" : "Tried"} before Refetcharr 1.5, which didn't record ${done ? "the original file's details or " : ""}why each release was chosen or turned down.${done ? "" : " Retry it to see the reasons."}</p>` : ""}
   </div>`;
+}
+
+// a season replaced episode by episode: where each episode is
+function fallbackList(d) {
+  const eps = d.fallback || [];
+  if (!eps.length) return "";
+  const n = (st) => eps.filter((x) => x.status === st).length, going = eps.filter((x) => PENDING.includes(x.status)).length;
+  const left = eps.length - n("replaced") - going - n("waiting");
+  return `<details class="note"><summary><b>Episode by episode:</b> ${n("replaced")} of ${eps.length} replaced${going ? `, ${going} in progress` : ""}${n("waiting") ? `, ${n("waiting")} still to search` : ""}${left ? `, ${left} not replaced` : ""}</summary>
+    <ul class="rej">${eps.map((x) => `<li><b>${esc(x.title || x.id)}</b>: ${esc(x.status)}</li>`).join("")}</ul></details>`;
 }
 
 // ── events ────────────────────────────────────────────────────────────────
@@ -900,9 +991,10 @@ function renderQRes() {
   paintTier($("q-video")); paintExample();
 }
 function paintExample() {
-  const [lo, hi] = qv.video[qRes], f = qv.codec_factor, label = Q_RES.find(([k]) => k === qRes)[1];
-  const gb = (pic, codec) => ((pic * (f[codec] || 1) + 0.64) * 7200 / 8 / 1000).toFixed(1);   // 2 hours, with DD+ 5.1
-  $("q-example").innerHTML = `A 2-hour ${label} film with DD+ 5.1 rates <b>MEDIUM</b> from about <b>${gb(lo, "x265")} GB</b> in x265 (${gb(lo, "x264")} GB in x264)
+  const [lo, hi] = qv.video[qRes], f = qv.codec_factor, label = Q_RES.find(([k]) => k === qRes)[1], tv = kindOf("quality") === "tv";
+  const secs = tv ? 2700 : 7200;   // a 45-minute episode, or a 2-hour film, with DD+ 5.1
+  const gb = (pic, codec) => ((pic * (f[codec] || 1) + 0.64) * secs / 8 / 1000).toFixed(1);
+  $("q-example").innerHTML = `A ${tv ? "45-minute" : "2-hour"} ${label} ${tv ? "episode" : "film"} with DD+ 5.1 rates <b>MEDIUM</b> from about <b>${gb(lo, "x265")} GB</b> in x265 (${gb(lo, "x264")} GB in x264)
     and <b>HIGH</b> from about <b>${gb(hi, "x265")} GB</b> (${gb(hi, "x264")} GB in x264).`;
 }
 function fillQuality(q, minPicture, prefer) {
@@ -916,7 +1008,13 @@ function fillQuality(q, minPicture, prefer) {
 }
 function paintWeight() { const w = +$("quality").video_weight.value; $("quality").video_weight_o.value = `${w}% picture, ${100 - w}% audio`; }
 async function loadQuality() {
-  try { const d = await api("GET", "/api/settings"); qDefaults = d.defaults; fillQuality(d.values.quality, d.values.rules.min_picture, d.values.rules.prefer); clean("quality"); }
+  try {
+    const d = await api("GET", "/api/settings"), tv = kindOf("quality") === "tv";
+    qDefaults = tv ? { quality: d.defaults.tv.quality, rules: d.defaults.tv.rules } : d.defaults;
+    $("quality-kind-note").textContent = tv ? "TV's own thresholds: TV encodes are leaner than films', so HIGH starts lower." : "The thresholds for films. TV has its own: switch to TV.";
+    if (tv) fillQuality(d.values.tv.quality, d.values.tv.rules.min_picture, d.values.tv.rules.prefer); else fillQuality(d.values.quality, d.values.rules.min_picture, d.values.rules.prefer);
+    clean("quality");
+  }
   catch (e) { toast(e.message, "err"); }
 }
 $("q-res").addEventListener("click", (e) => { const b = e.target.closest("[data-r]"); if (b) { qRes = b.dataset.r; renderQRes(); } });
@@ -932,8 +1030,9 @@ $("quality-reset").addEventListener("click", () => { fillQuality(qDefaults.quali
 $("quality").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    await api("PATCH", "/api/settings", { quality: qv, rules: { min_picture: qMin, prefer: qPrefer } });
-    say("quality-saved", "Saved. Searches use it now, and the ratings follow straight away."); clean("quality");
+    const tv = kindOf("quality") === "tv", body = { quality: qv, rules: { min_picture: qMin, prefer: qPrefer } };
+    await api("PATCH", "/api/settings", tv ? { tv: body } : body);
+    say("quality-saved", `Saved${tv ? " for TV" : ""}. Searches use it now, and the ratings follow straight away.`); clean("quality");
   } catch (err) { say("quality-saved", err.message, "err"); }
 });
 
@@ -985,11 +1084,11 @@ function suggDetail(sg) {
   const rej = sg.rejected || [], pick = sg.options.length ? pickOf(sg) : null;
   const cards = [ratingCard(sg.before, "Now on disk"), pick ? ratingCard(pick, pick === sg.options[0] ? "Best pick" : "Your pick") : ""].filter(Boolean);
   return `<div class="dd">
-    <div class="dd-head"><b>${esc(sg.title)} <span class="yr">${sg.year || ""}</span></b><span class="muted small">searched ${esc(sg.at)} · ${sg.releases} releases, ${sg.options.length} qualify</span></div>
+    <div class="dd-head"><b>${esc(sg.title)} <span class="yr">${sg.year || ""}</span></b><span class="muted small">searched ${esc(sg.at)} · ${sg.releases} ${sg.kind === "season" ? "season packs" : "releases"}, ${sg.options.length} qualify</span></div>
     ${sg.flagged ? `<p class="dd-flag"><b>${sg.mode === "upgrade" ? "Putting right" : "Flagged"}</b>${esc(sg.flagged)}</p>` : ""}
     ${cards.length ? `<div class="rcards ${cards.length > 1 ? "vs" : ""}">${cards.join('<span class="rarrow" aria-hidden="true">→</span>')}</div>`
       : ""}
-    <div class="opt now"><div class="opt-main"><div class="opt-title"><span class="pill-now">Now on disk</span><span class="name">${esc(sg.before.name || sg.before.quality || "")}</span></div>
+    <div class="opt now"><div class="opt-main"><div class="opt-title"><span class="pill-now">Now on disk</span><span class="name">${sg.kind === "season" && sg.episodes ? `${sg.episodes} episodes, such as ` : ""}${esc(sg.before.name || sg.before.quality || "")}</span></div>
       <div class="facts">${facts(sg.before)}</div></div><div class="opt-side">${miniCard(sg.before)}<span class="opt-save muted">${size(sg.before.size)}</span></div></div>
     ${sg.options.length ? `<div class="opts" role="radiogroup" aria-label="Releases for ${esc(sg.title)}">${sg.options.map((o, i) => optionCard(sg, o, i)).join("")}</div>
       <div class="opt-grab"><span class="muted small">Click a release to pick it: the pick is remembered for Grab picks.</span>
@@ -1017,8 +1116,10 @@ const pickRating = (s) => (s.options.length ? pickOf(s).rating ?? null : null);
 const ratingGain = (s) => (pickRating(s) != null && s.before.rating != null ? pickRating(s) - s.before.rating : null);
 function shownSugg() {
   const q = $("sg-q").value.trim().toLowerCase(), show = $("sg-f-show").value, fr = $("sg-f-rating").value, fres = $("sg-f-res").value;
+  const kind = ofKind("sg");
   return sugg.filter((s) => {
     const p = s.options.length ? pickOf(s) : null;
+    if (!kind(s)) return false;
     if (q && !s.title.toLowerCase().includes(q)) return false;
     if (show === "options" && !p) return false;
     if (show === "none" && p) return false;
@@ -1050,14 +1151,15 @@ function renderSuggestions() {
     const best = sg.options.length ? pickOf(sg) : null, open = expanded.has(`sg-rows:${sg.id}`);
     const mine = best && best !== sg.options[0] ? ' <span class="tag" style="--c: var(--violet)">your pick</span>' : "";
     return `<tr class="row-x ${open ? "open" : ""}" data-id="${sg.id}"><td class="pick"><input type="checkbox" value="${sg.id}" ${keep.has(String(sg.id)) ? "checked" : ""} aria-label="Select ${esc(sg.title)}"></td>
-      <td>${esc(sg.title)} <span class="yr">${sg.year || ""}</span>${sg.mode === "upgrade" ? ' <span class="tag" style="--c: var(--cyan)">put right</span>' : ""}</td>
+      <td>${esc(sg.title)} <span class="yr">${sg.year || ""}</span>${epCount(sg)}${sg.mode === "upgrade" ? ' <span class="tag" style="--c: var(--cyan)">put right</span>' : ""}</td>
       <td class="nowrap">${fileLine(sg.before)}<div class="muted small">${short(sg.before)}</div></td>
       <td>${best ? `<span class="nowrap">${fileLine(best)}${mine}</span><div class="muted small">${short(best)}</div>` : '<span class="muted">nothing qualified</span>'}</td>
       <td class="r nowrap">${best ? saveText(best.saving) : "–"}</td>
       <td class="r">${sg.options.length}</td><td class="muted small nowrap">${esc(sg.at)}</td></tr>`
       + (open ? `<tr class="detail" data-for="${sg.id}"><td colspan="7">${suggDetail(sg)}</td></tr>` : "");
-  }).join("") || `<tr><td colspan="7" class="empty">${sugg.length ? "No suggestions match." : "No suggestions yet. Pick films in Flagged films (or Replaced) and press Find replacements."}</td></tr>`;
-  $("sg-count").textContent = sugg.length ? `${v.length.toLocaleString()} of ${sugg.length.toLocaleString()} films` : "";
+  }).join("") || `<tr><td colspan="7" class="empty">${sugg.length ? "No suggestions match." : "No suggestions yet. Pick films or seasons under Flagged (or Replaced) and press Find replacements."}</td></tr>`;
+  const ofThis = sugg.filter(ofKind("sg")).length;
+  $("sg-count").textContent = sugg.length ? `${v.length.toLocaleString()} of ${ofThis.toLocaleString()} ${kindOf("sg") === "tv" ? "seasons" : "films"}` : "";
   $("sg-busy").textContent = status?.suggesting ? `${status.suggesting} still to search…` : "";
   if (dlgSugg != null && $("film-dlg").open) { const sg = sugg.find((s) => s.id === dlgSugg); if (sg) $("film-dlg-body").innerHTML = suggDetail(sg); }
   updateSgSel();
@@ -1108,6 +1210,15 @@ $("sg-grab").addEventListener("click", () => {
 });
 $("sg-clear").addEventListener("click", () => act(async () => { const r = await api("POST", "/api/suggestions/dismiss", { ids: pickedSg() }); await loadSuggestions(); return r; }));
 
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-kind-for] [data-kind]"); if (!b) return;
+  const page = b.closest("[data-kind-for]").dataset.kindFor;
+  if (kindOf(page) === b.dataset.kind) return;
+  if ((page === "rules" || page === "quality") && !tracked.get(page).btn.disabled && !confirm("Switching drops the unsaved changes on this page. Carry on?")) return;
+  try { localStorage.setItem(KIND_KEY + page, b.dataset.kind); } catch { /* private window */ }
+  paintKinds();
+  ({ lib: () => { libShown = 200; renderFilms(); }, sg: renderSuggestions, rules: loadRules, quality: loadQuality })[page]();
+});
 track("rules", () => JSON.stringify(rulesPatch()));
 track("quality", () => JSON.stringify([qv, qMin, qPrefer]));
 $("q-prefer").addEventListener("click", (e) => {
@@ -1117,5 +1228,6 @@ $("q-prefer").addEventListener("click", (e) => {
 track("settings", () => JSON.stringify(settingsPatch()));
 track("timing", () => JSON.stringify(TIMINGS.map((k) => $("timing")[k].value)));
 track("conn", () => JSON.stringify(["radarr_url", "radarr_api_key", "radarr_link", "refetcharr_url"].map((k) => $("conn")[k].value.trim())));
+track("sconn", () => JSON.stringify([...["sonarr_url", "sonarr_api_key", "sonarr_link"].map((k) => $("sconn")[k].value.trim()), $("sconn").tv_enabled.checked]));
 track("security", () => JSON.stringify(["username", "password", "confirm"].map((k) => $("security")[k].value)));
 showTab(); refresh(); setInterval(refresh, 5000);

@@ -47,7 +47,7 @@ def main() -> None:
     p.add_argument("user", nargs="?", default="", help="login set: the username")
     p.add_argument("--new", action="store_true", help="apikey: make a new key")
     p.add_argument("--password-stdin", action="store_true", help="login set: read the password from standard input")
-    p.add_argument("--id", type=int, nargs="*", default=[], help="queue/retry: Radarr movie ids")
+    p.add_argument("--id", type=int, nargs="*", default=[], help="queue/retry: Refetcharr ids (a film's Radarr id; seasons and episodes as listed in the web UI)")
     p.add_argument("--match", default="", help="retry: only films whose title contains this")
     a = p.parse_args()
     if a.command == "login":

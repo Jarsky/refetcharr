@@ -22,7 +22,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M8 5v4M12 5v4M16 5v4"/></svg>
         <span>Library</span><span class="badge dot" id="b-library-top" hidden></span></a>
       <div class="nav-sub">
-        <a href="#library" data-tab="library">Flagged films<span class="badge dot" id="b-library" hidden title="New scan"></span></a>
+        <a href="#library" data-tab="library">Flagged<span class="badge dot" id="b-library" hidden title="New scan"></span></a>
         <a href="#suggestions" data-tab="suggestions">Suggestions<span class="badge info" id="b-suggestions" hidden></span></a>
       </div>
     </div>
@@ -45,6 +45,7 @@
         <a href="#quality" data-tab="quality">Quality</a>
         <a href="#queue" data-tab="queue">Queue &amp; schedule</a>
         <a href="#radarr" data-tab="radarr">Radarr<span class="badge" id="b-radarr" hidden></span></a>
+        <a href="#sonarr" data-tab="sonarr">Sonarr<span class="badge" id="b-sonarr" hidden></span></a>
         <a href="#timings" data-tab="timings">Timings</a>
         <a href="#security" data-tab="security">Security</a>
       </div>
@@ -108,6 +109,7 @@
   <section id="tab-library" class="tab" hidden>
     <div class="card">
       <div class="toolbar">
+        <div class="seg kind" data-kind-for="lib" role="group" aria-label="Films or TV" hidden><button type="button" data-kind="films" aria-pressed="true">Films</button><button type="button" data-kind="tv" aria-pressed="false">TV</button></div>
         <input id="lib-q" type="search" placeholder="Find a title…" aria-label="Find a title">
         <div id="lib-groups" class="chips" role="group" aria-label="Groups"></div>
         <label class="check"><input id="lib-untried" type="checkbox" checked> Not tried yet</label>
@@ -126,13 +128,13 @@
         <div class="seg view" data-view-for="lib" role="group" aria-label="View"><button type="button" data-view="list" aria-pressed="true">List</button><button type="button" data-view="covers" aria-pressed="false">Covers</button></div>
       </div>
       <div id="lib-est" class="est" hidden aria-live="polite"></div>
-      <p class="muted small hint">Click a film for its details: why it's flagged, its picture and audio, and what a replacement must keep.
+      <p class="muted small hint" id="lib-hint">Click a film for its details: why it's flagged, its picture and audio, and what a replacement must keep.
         Find replacements searches now and lists every release that qualifies, to pick from under Suggestions.</p>
       <div class="tablebox" id="lib-table">
         <table class="data">
           <thead><tr>
             <th class="pick"><input id="lib-all" type="checkbox" aria-label="Select all shown"></th>
-            <th data-sort="title">Film</th><th data-sort="group">Group</th><th data-sort="quality">Quality</th>
+            <th data-sort="title" id="lib-th-title">Film</th><th data-sort="group">Group</th><th data-sort="quality">Quality</th>
             <th data-sort="rating_sort" title="Out of 5: picture and audio for its resolution, weighted (Settings → Quality). LOW under 2.0, MEDIUM to 3.5, HIGH from 3.5">Rating</th>
             <th data-sort="size_gb" class="r">Size</th><th data-sort="mb_per_min" class="r">MB/min</th>
             <th data-sort="saving_gb" class="r">Saves about</th><th>Refetcharr</th>
@@ -160,7 +162,7 @@
         LOW now, or HDR or surround sound was lost. Replace again looks for a better file, of any size up to the maximum.</p>
       <div class="tablebox">
         <table class="data">
-          <thead><tr><th class="pick"><input id="done-all" type="checkbox" aria-label="Select all shown"></th><th>Film</th><th>When</th><th>Was</th><th title="Before → after (Settings → Quality)">Rating</th><th class="r">Before</th><th class="r">After</th><th class="r">Freed</th></tr></thead>
+          <thead><tr><th class="pick"><input id="done-all" type="checkbox" aria-label="Select all shown"></th><th>Title</th><th>When</th><th>Was</th><th title="Before → after (Settings → Quality)">Rating</th><th class="r">Before</th><th class="r">After</th><th class="r">Freed</th></tr></thead>
           <tbody id="done-rows" data-cols="8"></tbody>
         </table>
       </div>
@@ -177,6 +179,7 @@
         <button id="sg-clear" class="btn ghost" disabled>Clear selected</button>
       </div>
       <div class="filters">
+        <div class="seg kind" data-kind-for="sg" role="group" aria-label="Films or TV" hidden><button type="button" data-kind="films" aria-pressed="true">Films</button><button type="button" data-kind="tv" aria-pressed="false">TV</button></div>
         <input id="sg-q" type="search" placeholder="Find a title…" aria-label="Find a title">
         <label>Show <select id="sg-f-show"><option value="">All</option><option value="options">With releases</option><option value="none">Nothing qualified</option><option value="mine">Your picks</option><option value="shrink">Getting smaller</option><option value="grow">Getting bigger</option></select></label>
         <label>Pick rated <select id="sg-f-rating"><option value="">Any</option><option value="HIGH">HIGH</option><option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option></select></label>
@@ -189,7 +192,7 @@
       <div id="sg-est" class="est" hidden aria-live="polite"></div>
       <div class="tablebox" id="sg-table">
         <table class="data">
-          <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Film</th><th>Now</th><th>Pick</th><th class="r">Saves</th><th class="r">Options</th><th>Searched</th></tr></thead>
+          <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Title</th><th>Now</th><th>Pick</th><th class="r">Saves</th><th class="r">Options</th><th>Searched</th></tr></thead>
           <tbody id="sg-rows" data-cols="7"></tbody>
         </table>
       </div>
@@ -200,13 +203,13 @@
   <section id="tab-failed" class="tab" hidden>
     <div class="card">
       <div class="toolbar">
-        <p class="muted">Films that were tried but kept their original file. Click one to see every release that was turned down and why. Retry when new releases or seeders may have turned up.</p>
+        <p class="muted">Films and seasons that were tried but kept their original file. Click one to see every release that was turned down and why. Retry when new releases or seeders may have turned up.</p>
         <button id="retry-sel" class="btn" disabled>Retry selected</button>
         <button id="retry-all" class="btn primary">Retry all</button>
       </div>
       <div class="tablebox">
         <table class="data">
-          <thead><tr><th class="pick"><input id="fail-all" type="checkbox" aria-label="Select all"></th><th>Film</th><th>Status</th><th>Why</th><th class="r">Size</th></tr></thead>
+          <thead><tr><th class="pick"><input id="fail-all" type="checkbox" aria-label="Select all"></th><th>Title</th><th>Status</th><th>Why</th><th class="r">Size</th></tr></thead>
           <tbody id="fail-rows" data-cols="5"></tbody>
         </table>
       </div>
@@ -231,6 +234,15 @@
 
   <section id="tab-replacement" class="tab" hidden>
     <form id="rules" class="stack">
+      <div class="kindbar" hidden><div class="seg kind" data-kind-for="rules" role="group" aria-label="Films or TV" hidden><button type="button" data-kind="films" aria-pressed="true">Films</button><button type="button" data-kind="tv" aria-pressed="false">TV</button></div><span class="muted small" id="rules-kind-note"></span></div>
+      <div class="card" id="tv-card" hidden>
+        <h2>TV</h2>
+        <p class="muted">Each complete season that's finished airing is one item, replaced by a season pack. Seasons still airing or missing episodes are left alone.</p>
+        <div class="switches two">
+          <label class="switch"><input type="checkbox" name="tv_auto"><span>Auto-queue TV too <small>with Auto-queue on, seasons are queued like films (and Queue the biggest wins takes them). Off: only seasons you pick are replaced</small></span></label>
+          <label class="switch"><input type="checkbox" name="tv_fallback"><span>Episode by episode when no season pack qualifies <small>each episode is then searched and replaced on its own, judged the way its season was</small></span></label>
+        </div>
+      </div>
       <div class="card">
         <h2>Profile</h2>
         <p class="muted">A starting point for the sizes and keep rules below and the picture rating on the Quality page. Picking one saves it straight away;
@@ -239,7 +251,7 @@
       </div>
       <div class="card">
         <h2>What to go after</h2>
-        <p class="muted">Which kinds of film Refetcharr looks for replacements for.</p>
+        <p class="muted" id="groups-note">Which kinds of film Refetcharr looks for replacements for.</p>
         <div id="set-groups" class="switches"></div>
       </div>
       <div class="card">
@@ -258,13 +270,13 @@
       </div>
       <div class="card">
         <h2>Leave alone</h2>
-        <p class="muted">Films whose current file is from one of these release groups are never replaced, and releases from the second list are never downloaded.
-          Names are matched whole, in any case. Films you ignore one by one (Oversized films → Ignore selected) are listed at the bottom.</p>
+        <p class="muted">Films and seasons whose current file is from one of these release groups are never replaced, and releases from the second list are never downloaded.
+          Names are matched whole, in any case. These lists are the same for films and TV. What you ignore one by one (Flagged → Ignore selected) is listed at the bottom.</p>
         <div class="grid2">
           <div><h3>Keep films from these groups</h3><div id="ig-file_groups" class="taglist"></div></div>
           <div><h3>Never download from these groups</h3><div id="ig-release_groups" class="taglist"></div></div>
         </div>
-        <h3>Films ignored one by one</h3>
+        <h3>Ignored one by one</h3>
         <div id="ig-films"></div>
       </div>
       <div class="card">
@@ -309,6 +321,7 @@
 
   <section id="tab-quality" class="tab" hidden>
     <form id="quality" class="stack">
+      <div class="kindbar" hidden><div class="seg kind" data-kind-for="quality" role="group" aria-label="Films or TV" hidden><button type="button" data-kind="films" aria-pressed="true">Films</button><button type="button" data-kind="tv" aria-pressed="false">TV</button></div><span class="muted small" id="quality-kind-note"></span></div>
       <div class="card">
         <h2>Ratings</h2>
         <p class="muted">The thresholds that rate a file LOW, MEDIUM or HIGH. The picture is rated for its resolution, in x265 terms: the audio's share
@@ -348,7 +361,7 @@
       <label class="switch"><input type="checkbox" name="auto"><span>Auto-queue <small>keep downloads topped up by itself</small></span></label>
       <div class="fields">
         <label>Downloads at once<input type="number" name="max_active" min="1" max="100"></label>
-        <label>Films grabbed per day <small>0 = no limit</small><input type="number" name="max_per_day" min="0" max="1000"></label>
+        <label>Grabbed per day <small>films, seasons and episodes; 0 = no limit</small><input type="number" name="max_per_day" min="0" max="1000"></label>
         <label>Rescan the library every <small>days, 0 = by hand</small><input type="number" name="every_days" min="0" max="90"></label>
       </div>
       <h3>Schedule</h3>
@@ -370,7 +383,7 @@
           <label>Address<input type="url" name="radarr_url" placeholder="http://radarr:7878"><small id="conn-url-note"></small></label>
           <label>API key <small>Radarr → Settings → General</small><input type="password" name="radarr_api_key" autocomplete="new-password"><small id="conn-key-note"></small></label>
           <label>Address for links <small>Radarr as your browser reaches it, for the film links</small><input type="url" name="radarr_link" placeholder="https://radarr.example.com"><small id="conn-link-note"></small></label>
-          <label>Refetcharr's address for Radarr <small>how Radarr reaches Refetcharr, for its import webhook (same Docker network: http://refetcharr:8787)</small><input type="url" name="refetcharr_url" placeholder="http://refetcharr:8787"></label>
+          <label>Refetcharr's address for Radarr and Sonarr <small>how they reach Refetcharr, for their import webhooks (same Docker network: http://refetcharr:8787)</small><input type="url" name="refetcharr_url" placeholder="http://refetcharr:8787"></label>
         </div>
         <div class="save"><button class="btn primary">Save</button><button type="button" id="conn-test" class="btn">Test</button>
           <span id="conn-result" class="muted small" role="status"></span></div>
@@ -381,6 +394,30 @@
         <p class="muted">What Refetcharr relies on in Radarr. Mostly it stops Radarr upgrading replaced films straight back to remuxes, and the webhook
           tells Refetcharr about new files as they arrive. Fixes change Radarr only when you press them.</p>
         <ul id="setup" class="checks"><li class="empty">Checking…</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-sonarr" class="tab" hidden>
+    <div class="grid2">
+      <form id="sconn" class="card" autocomplete="off">
+        <h2>Sonarr connection</h2>
+        <div class="fields one">
+          <label>Address<input type="url" name="sonarr_url" placeholder="http://sonarr:8989"><small id="sconn-url-note"></small></label>
+          <label>API key <small>Sonarr → Settings → General</small><input type="password" name="sonarr_api_key" autocomplete="new-password"><small id="sconn-key-note"></small></label>
+          <label>Address for links <small>Sonarr as your browser reaches it, for the series links</small><input type="url" name="sonarr_link" placeholder="https://sonarr.example.com"><small id="sconn-link-note"></small></label>
+        </div>
+        <label class="switch"><input type="checkbox" name="tv_enabled"><span>Look after TV <small>off: Refetcharr leaves Sonarr alone, and TV disappears from every page</small></span></label>
+        <p class="muted small">Refetcharr's address for Sonarr's webhook is the one under <a href="#radarr">Settings → Radarr</a>.</p>
+        <div class="save"><button class="btn primary">Save</button><button type="button" id="sconn-test" class="btn">Test</button>
+          <span id="sconn-result" class="muted small" role="status"></span></div>
+      </form>
+      <div class="card">
+        <div class="setup-head"><h2>Sonarr setup</h2><button type="button" id="ssetup-fix-all" class="btn primary" hidden>Fix all</button>
+          <button type="button" id="ssetup-refresh" class="btn ghost">Check again</button></div>
+        <p class="muted">The same as for Radarr: Sonarr mustn't upgrade replaced seasons straight back to remuxes or bigger files, and its webhook tells
+          Refetcharr about new episodes. Sonarr 5 keeps its size limits on each quality in a profile, so those are what's checked. Fixes change Sonarr only when you press them.</p>
+        <ul id="ssetup" class="checks"><li class="empty">Checking…</li></ul>
       </div>
     </div>
   </section>
@@ -433,12 +470,12 @@
 <dialog id="scan-confirm" class="confirm" aria-labelledby="scan-title">
   <form method="dialog">
     <h2 id="scan-title">Rescan the library?</h2>
-    <p>This reads every film from Radarr and rebuilds the oversized list and reports. It can take some time, and Radarr may be slower while it runs. Downloads carry on as normal.</p>
+    <p>This reads every film from Radarr and every series from Sonarr, and rebuilds the flagged list and reports. It can take some time, and both may be slower while it runs. Downloads carry on as normal.</p>
     <div class="save"><button value="scan" class="btn primary">Rescan</button><button value="cancel" class="btn ghost" autofocus>Cancel</button></div>
   </form>
 </dialog>
 <div id="toast" class="toast" role="status" hidden></div>
-<dialog id="film-dlg" class="film-dlg" aria-label="Film details"><button type="button" class="dlg-x" data-close aria-label="Close">✕</button><div id="film-dlg-body"></div></dialog>
+<dialog id="film-dlg" class="film-dlg" aria-label="Details"><button type="button" class="dlg-x" data-close aria-label="Close">✕</button><div id="film-dlg-body"></div></dialog>
 <script src="/static/app.js"></script>
 </body>
 </html>

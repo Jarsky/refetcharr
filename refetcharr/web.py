@@ -4,12 +4,12 @@ import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import VERSION, auth, config, quality, radarr, rules, setup
+from . import VERSION, arr, auth, config, quality, radarr, rules, setup, sonarr
 from .engine import Engine
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -38,7 +38,7 @@ async def _signed_in(request: Request, call_next):
     TUI and CLI send). With no login set yet, the sign-in page asks for one."""
     path = request.url.path
     if path in OPEN or auth.session_ok(request.cookies.get(auth.COOKIE)) or auth.key_ok(request.headers.get("x-api-key")) \
-            or (path == setup.WEBHOOK_PATH and auth.key_ok(request.query_params.get("apikey"))):  # Radarr can't send headers
+            or (path in setup.WEBHOOK_PATHS.values() and auth.key_ok(request.query_params.get("apikey"))):  # the apps can't send headers
         return await call_next(request)
     if path.startswith("/api/"):
         return JSONResponse({"detail": "Sign in first"}, status_code=401)
@@ -60,12 +60,16 @@ class QueueIn(BaseModel):
 
 
 class ConnectionsIn(BaseModel):
+    app: str = Field("radarr", pattern="^(radarr|sonarr)$")
     radarr_url: str = Field("", max_length=300)
     radarr_api_key: str = Field("", max_length=200)
+    sonarr_url: str = Field("", max_length=300)
+    sonarr_api_key: str = Field("", max_length=200)
 
 
 class FixIn(BaseModel):
     ids: list[str] = Field(default_factory=list, max_length=20)
+    app: str = Field("radarr", pattern="^(radarr|sonarr)$")
 
 
 class LoginIn(BaseModel):
@@ -99,8 +103,9 @@ class RetryIn(BaseModel):
     match: str = Field("", max_length=200)
 
 
-def _check_rules(r: dict) -> None:
-    """Refuse values the rules can't work with, by the type each setting has in the defaults. Lists are tidied in place."""
+def _check_rules(r: dict, kind: str = "films") -> None:
+    """Refuse values the rules can't work with, by the type each setting has in the defaults. Lists are tidied in place.
+    `kind` "tv": TV's rules (the same keys, checked against TV's saved ones)."""
     defaults = config.DEFAULTS["rules"]
     for k, v in r.items():
         want = defaults.get(k)
@@ -128,11 +133,12 @@ def _check_rules(r: dict) -> None:
         raise HTTPException(400, "max_ratio must be between 0.1 and 1")
     if "stall_warn_hours" in r and r["stall_warn_hours"] > 720:
         raise HTTPException(400, "Warn about stalled downloads within 720 hours (30 days), or 0 for never")
-    merged = {**config.load()["rules"], **r}
+    saved = config.load()
+    merged = {**(saved["tv"]["rules"] if kind == "tv" else saved["rules"]), **r}
     for res, label in (("1080", "1080p"), ("2160", "4K")):
         order = [merged[f"{k}_{res}"] for k in ("tiny", "min", "preferred", "cap")]
         if order != sorted(order):
-            raise HTTPException(400, f"{label} sizes must go up in order: too small, minimum, preferred, maximum")
+            raise HTTPException(400, f"{'TV ' if kind == 'tv' else ''}{label} sizes must go up in order: too small, minimum, preferred, maximum")
 
 
 TIMING_MAX = {"missing_minutes": 1440, "import_wait_minutes": 1440, "no_video_hours": 72, "finish_warn_minutes": 1440,
@@ -155,10 +161,23 @@ def _check_quality(q: dict) -> None:
             raise HTTPException(400, f"Codec factor for {k} must be from 0.2 to 5")
 
 
+def _check_tv(tv: dict) -> None:
+    """TV's own settings: its switches, groups, rules and quality."""
+    for k in ("enabled", "auto", "episode_fallback"):
+        if k in tv and not isinstance(tv[k], bool):
+            raise HTTPException(400, f"tv.{k} must be on or off")
+    for k, v in (tv.get("groups") or {}).items():
+        if k not in config.DEFAULTS["tv"]["groups"] or not isinstance(v, bool):
+            raise HTTPException(400, f"TV group {k} must be one of {', '.join(config.DEFAULTS['tv']['groups'])}, on or off")
+    _check_rules(tv.get("rules") or {}, "tv")
+    _check_quality(tv.get("quality") or {})
+
+
 def _check_other(patch: dict) -> None:
     """The ignore lists, the timings, the quality thresholds and the addresses."""
     _check_quality(patch.get("quality") or {})
-    for k in ("radarr_link", "refetcharr_url"):
+    _check_tv(patch.get("tv") or {})
+    for k in ("radarr_link", "sonarr_link", "refetcharr_url"):
         v = (patch.get("connections") or {}).get(k)
         if v and not str(v).startswith(("http://", "https://")):
             raise HTTPException(400, f"{k} must start with http:// or https://")
@@ -174,15 +193,16 @@ def _check_other(patch: dict) -> None:
                     seen.setdefault(x.strip().lower(), x.strip())  # the first spelling wins
             ig[k] = list(seen.values())
     if "films" in ig and (not isinstance(ig["films"], list) or not all(isinstance(x, int) and not isinstance(x, bool) for x in ig["films"])):
-        raise HTTPException(400, "films must be a list of Radarr movie ids")
+        raise HTTPException(400, "films must be a list of Refetcharr ids (films, seasons and episodes)")
     for k, v in (patch.get("timing") or {}).items():
         if k in TIMING_MAX and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 1 <= v <= TIMING_MAX[k]):
             raise HTTPException(400, f"{k} must be from 1 to {TIMING_MAX[k]}")
-    link = (patch.get("connections") or {}).get("radarr_link")
-    if link and not str(link).startswith(("http://", "https://")):
-        raise HTTPException(400, "The Radarr link address must start with http:// or https://")
-    if isinstance(link, str):
-        patch["connections"]["radarr_link"] = link.strip().rstrip("/")
+    for k, name in (("radarr_link", "Radarr"), ("sonarr_link", "Sonarr")):
+        link = (patch.get("connections") or {}).get(k)
+        if link and not str(link).startswith(("http://", "https://")):
+            raise HTTPException(400, f"The {name} link address must start with http:// or https://")
+        if isinstance(link, str):
+            patch["connections"][k] = link.strip().rstrip("/")
 
 
 @app.get("/api/health")
@@ -327,14 +347,19 @@ def choose(body: PickIn):
 
 
 @app.get("/api/profiles")
-def profiles():
-    """The replacement profiles, and which one the saved rules match ("custom": none)."""
-    return {"current": config.profile_of(config.load()["rules"]),
-            "profiles": [{"id": k, **v} for k, v in config.PROFILES.items()]}
+def profiles(kind: str = "films"):
+    """The replacement profiles, and which one the saved rules match ("custom": none), for films or TV."""
+    s = config.load()
+    tv = kind == "tv"
+    return {"current": config.profile_of(s["tv"]["rules"] if tv else s["rules"], kind), "kind": "tv" if tv else "films",
+            "current_tv": config.profile_of(s["tv"]["rules"], "tv"), "current_films": config.profile_of(s["rules"]),
+            "profiles": [{"id": k, **v, "rules": config.profile_rules(k, "tv" if tv else "films")} for k, v in config.PROFILES.items()],
+            "tv_profiles": [{"id": k, **v, "rules": config.profile_rules(k, "tv")} for k, v in config.PROFILES.items()]}
 
 
 class ProfileIn(BaseModel):
     id: str
+    kind: str = Field("films", pattern="^(films|tv)$")
 
 
 @app.post("/api/profile")
@@ -342,8 +367,10 @@ def set_profile(body: ProfileIn):
     p = config.PROFILES.get(body.id)
     if not p:
         raise HTTPException(400, f"There's no profile called {body.id}")
-    config.save({"rules": p["rules"]})
-    return {"message": f"{p['label']} profile on: new searches use it now; the estimates follow straight away.", "current": body.id}
+    rules_ = config.profile_rules(body.id, body.kind)
+    config.save({"tv": {"rules": {**config.load()["tv"]["rules"], **rules_}}} if body.kind == "tv" else {"rules": rules_})
+    return {"message": f"{p['label']} profile on for {'TV' if body.kind == 'tv' else 'films'}: new searches use it now; "
+                       "the estimates follow straight away.", "current": body.id}
 
 
 @app.post("/api/pick/best")
@@ -364,12 +391,15 @@ POSTER_DAYS = 30  # a cached poster is fetched from Radarr again after this long
 
 @app.get("/api/poster/{mid}")
 def poster(mid: int):
-    """A film's poster for the cover view: fetched from Radarr once and kept in the data folder (about 20 KB each)."""
-    path = os.path.join(config.DATA, "posters", f"{int(mid)}.jpg")
-    have = os.path.exists(path)
+    """A film's poster for the cover view, or its series' for a season or episode: fetched from Radarr or Sonarr once and
+    kept in the data folder (about 20 KB each)."""
+    name = arr.poster_name(mid)
+    path = os.path.join(config.DATA, "posters", f"{name}.jpg") if name else ""
+    have = bool(path) and os.path.exists(path)
     if not have or time.time() - os.path.getmtime(path) > POSTER_DAYS * 86400:
         try:
-            data = radarr.poster(mid)
+            data, name = arr.poster(mid)
+            path = os.path.join(config.DATA, "posters", f"{name}.jpg")
         except radarr.RadarrError:
             if not have:
                 raise HTTPException(404, "No poster for that film") from None
@@ -385,6 +415,18 @@ def poster(mid: int):
 def film_detail(mid: int):
     """One film's drop-down: before and after, why it was flagged, why that release, what was turned down."""
     return engine.detail(mid)
+
+
+@app.post(setup.WEBHOOK_PATHS["sonarr"])
+def sonarr_webhook(body: dict):
+    """Sonarr's Connect → Webhook: a series got a new episode file (or lost one). Read the series again within seconds."""
+    event = body.get("eventType") or ""
+    sid = (body.get("series") or {}).get("id")
+    if event in ("Download", "EpisodeFileDelete", "Rename") and isinstance(sid, int) and not isinstance(sid, bool):
+        why = {"Download": "upgraded by Sonarr" if body.get("isUpgrade") else "imported by Sonarr",
+               "EpisodeFileDelete": "episode file deleted", "Rename": "renamed"}[event]
+        engine.jobs.append(("series", sid, why))
+    return {"ok": True, "event": event}
 
 
 @app.post(setup.WEBHOOK_PATH)
@@ -416,15 +458,18 @@ def patch_settings(patch: dict):
         raise HTTPException(400, "Downloads at once must be at least 1 (use Pause to stop)")
     _check_rules(patch.get("rules") or {})
     _check_other(patch)
-    url = (patch.get("connections") or {}).get("radarr_url")
-    if url and not str(url).startswith(("http://", "https://")):
-        raise HTTPException(400, "The Radarr address must start with http:// or https://")
+    for k, name in (("radarr_url", "Radarr"), ("sonarr_url", "Sonarr")):
+        url = (patch.get("connections") or {}).get(k)
+        if url and not str(url).startswith(("http://", "https://")):
+            raise HTTPException(400, f"The {name} address must start with http:// or https://")
     values = config.save(patch)
     if "rules" in patch or "queue" in patch or "timing" in patch:
         engine._last_import = 0  # a new stall limit shows at the next check, not two minutes later
-    if "connections" in patch:  # a new connection: read the library again and recheck Radarr's setup
+    if "connections" in patch or "enabled" in (patch.get("tv") or {}):  # read the library again and recheck the setup
         engine.movies_at = 0
         engine._last_setup = 0
+        if any(k.startswith("sonarr") for k in patch.get("connections") or {}):
+            arr.TV.reset()
     return {"values": config.public(values)}
 
 
@@ -432,6 +477,9 @@ def patch_settings(patch: dict):
 def test_connections(body: ConnectionsIn):
     """Try the values in the form (blank fields fall back to what's saved) without saving them."""
     try:
+        if body.app == "sonarr":
+            st = sonarr.call("GET", "/system/status", url=body.sonarr_url, key=body.sonarr_api_key)
+            return {"ok": True, "message": f"Connected to Sonarr {st.get('version')}"}
         st = radarr.call("GET", "/system/status", url=body.radarr_url, key=body.radarr_api_key)
         return {"ok": True, "message": f"Connected to Radarr {st.get('version')}"}
     except radarr.RadarrError as e:
@@ -439,21 +487,23 @@ def test_connections(body: ConnectionsIn):
 
 
 @app.get("/api/setup")
-def get_setup():
-    return {"checks": engine.check_setup()}
+def get_setup(app_: str = Query("radarr", alias="app", pattern="^(radarr|sonarr)$")):
+    checks = engine.check_setup(app_)
+    engine.check_setup()  # keeps the Settings badge for both apps up to date
+    return {"checks": checks}
 
 
 @app.post("/api/setup/fix")
 def fix_setup(body: FixIn):
     try:
-        movies = engine.library()
-        done = setup.fix(body.ids, movies)
+        items = [m for m in engine.library() if arr.app(m["id"]) == body.app]
+        done = setup.fix(body.ids, items, body.app)
     except radarr.RadarrError as e:
         raise HTTPException(502, str(e)) from None
     from . import store
     for d in done:
-        store.log("setup", f"Radarr setup: {d}")
-    return {"done": done, "checks": engine.check_setup()}
+        store.log("setup", f"{body.app.title()} setup: {d}")
+    return {"done": done, "checks": engine.check_setup(body.app)}
 
 
 @app.post("/api/queue")

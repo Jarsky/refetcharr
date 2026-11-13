@@ -1,29 +1,37 @@
 """Settings, in data/settings.json, edited from the TUI and web UI. Unknown keys are ignored and missing ones fall back
-to the defaults, so old files keep working. The Radarr connection can also come from the environment (.env): a value
-saved in Settings wins. Secrets (API key, passwords) are never sent back to the UI, only whether they're set."""
+to the defaults, so old files keep working. The Radarr and Sonarr connections can also come from the environment (.env):
+a value saved in Settings wins. Secrets (API keys, passwords) are never sent back to the UI, only whether they're set.
+
+TV (1.9.0) has its own replacement rules, groups and quality thresholds under "tv", with the same keys as the film ones:
+for_item() hands each film, season or episode the settings for its kind."""
 
 import copy
 import json
 import os
 import threading
 
-from . import quality
+from . import ids, quality
 
 DATA = os.environ.get("REFETCHARR_DATA", "/data/refetcharr")
 ENV_RADARR_URL = os.environ.get("RADARR_URL", "http://radarr:7878").rstrip("/")
 ENV_RADARR_API_KEY = os.environ.get("RADARR_API_KEY", "")
+ENV_SONARR_URL = os.environ.get("SONARR_URL", "http://sonarr:8989").rstrip("/")
+ENV_SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
 FFPROBE = os.environ.get("FFPROBE", "ffprobe")
 PORT = int(os.environ.get("PORT", "8787"))
 API = os.environ.get("REFETCHARR_API", f"http://127.0.0.1:{PORT}")  # where the TUI finds the server
 
-SECRETS = ("radarr_api_key",)
+SECRETS = ("radarr_api_key", "sonarr_api_key")
 
 DEFAULTS = {
     "connections": {
         "radarr_url": "",  # blank: RADARR_URL from .env, else http://radarr:7878
         "radarr_api_key": "",  # blank: RADARR_API_KEY from .env
         "radarr_link": "",  # Radarr's address in your browser, for the film links (blank: the address above)
-        "refetcharr_url": "http://refetcharr:8787",  # how Radarr reaches Refetcharr, for its import webhook
+        "refetcharr_url": "http://refetcharr:8787",  # how Radarr and Sonarr reach Refetcharr, for their import webhooks
+        "sonarr_url": "",  # blank: SONARR_URL from .env, else http://sonarr:8989
+        "sonarr_api_key": "",  # blank: SONARR_API_KEY from .env
+        "sonarr_link": "",  # Sonarr's address in your browser, for the series links (blank: the address above)
     },
     "queue": {
         "auto": False,  # keep the queue topped up by itself (within the limits and window below)
@@ -83,6 +91,21 @@ DEFAULTS = {
     "auth": {"username": "", "password_hash": "", "secret": "", "api_key": "", "epoch": 0},
 }
 
+# TV's own settings (1.9.0). Sizes are MB per minute like the films', and the defaults are Sonarr's own maximums
+# (60 and 120 for 1080p and 4K) with targets measured on a 2,455-season library (2026-11): TV encodes are leaner than
+# films (a typical 1080p WEB-DL is 3 to 5 Mbps, 4K 12 to 20), so its picture thresholds are lower too.
+TV_SIZES = {"tiny_1080": 8, "tiny_2160": 20, "min_1080": 15, "min_2160": 40, "preferred_1080": 35, "preferred_2160": 90,
+            "cap_1080": 60, "cap_2160": 120}
+TV_QUALITY = {"video": {"sd": [0.5, 1.0], "720": [1.2, 2.2], "1080": [2.0, 3.5], "2160": [7.0, 11.0]}}
+DEFAULTS["tv"] = {
+    "enabled": True,  # look after TV once Sonarr is connected
+    "auto": False,  # auto-queue (and "queue the biggest wins") takes seasons too; off: only seasons picked by hand
+    "episode_fallback": True,  # when no season pack qualifies, replace the season episode by episode
+    "groups": copy.deepcopy(DEFAULTS["queue"]["groups"]),
+    "rules": {**copy.deepcopy(DEFAULTS["rules"]), **TV_SIZES},
+    "quality": {**copy.deepcopy(DEFAULTS["quality"]), **copy.deepcopy(TV_QUALITY)},
+}
+
 # Replacement profiles (1.7.0): one click sets these rules; any other value of them shows as Custom. Balanced is the
 # defaults. Sizes are MB/min, as in Settings → Replacement; the caps, floors and everything else stay as you set them.
 PROFILES = {
@@ -108,9 +131,27 @@ PROFILES = {
 }
 
 
-def profile_of(r: dict) -> str:
+# TV's targets for each profile (the rest of a profile is the same for films and TV)
+TV_PROFILE_SIZES = {"savings": {"preferred_1080": 25, "preferred_2160": 70}, "balanced": {"preferred_1080": 35, "preferred_2160": 90},
+                    "quality": {"preferred_1080": 45, "preferred_2160": 110}}
+
+
+def profile_rules(pid: str, kind: str = "films") -> dict:
+    p = PROFILES[pid]["rules"]
+    return {**p, **TV_PROFILE_SIZES[pid]} if kind == "tv" else dict(p)
+
+
+def profile_of(r: dict, kind: str = "films") -> str:
     """The profile whose rules all match `r`, else "custom"."""
-    return next((k for k, p in PROFILES.items() if all(r.get(x) == v for x, v in p["rules"].items())), "custom")
+    return next((k for k in PROFILES if all(r.get(x) == v for x, v in profile_rules(k, kind).items())), "custom")
+
+
+def for_item(s: dict, i) -> dict:
+    """The settings as they apply to one item: a season's or an episode's rules, groups and quality are TV's."""
+    if not ids.is_tv(i):
+        return s
+    tv = s["tv"]
+    return {**s, "rules": tv["rules"], "quality": tv["quality"], "queue": {**s["queue"], "groups": tv["groups"]}}
 
 
 _lock = threading.Lock()
@@ -138,12 +179,22 @@ def radarr_key() -> str:
     return load()["connections"]["radarr_api_key"] or ENV_RADARR_API_KEY
 
 
+def sonarr_url() -> str:
+    return (load()["connections"]["sonarr_url"] or ENV_SONARR_URL).rstrip("/")
+
+
+def sonarr_key() -> str:
+    return load()["connections"]["sonarr_api_key"] or ENV_SONARR_API_KEY
+
+
 def public(values: dict) -> dict:
     """Settings as the UI may see them: secrets blanked, with whether each is set (in Settings or .env)."""
     out = copy.deepcopy(values)
     c = out["connections"]
-    out["secrets_set"] = {"radarr_api_key": bool(c["radarr_api_key"] or ENV_RADARR_API_KEY)}
-    out["env"] = {"radarr_url": ENV_RADARR_URL, "radarr_api_key": bool(ENV_RADARR_API_KEY)}
+    out["secrets_set"] = {"radarr_api_key": bool(c["radarr_api_key"] or ENV_RADARR_API_KEY),
+                          "sonarr_api_key": bool(c["sonarr_api_key"] or ENV_SONARR_API_KEY)}
+    out["env"] = {"radarr_url": ENV_RADARR_URL, "radarr_api_key": bool(ENV_RADARR_API_KEY),
+                  "sonarr_url": ENV_SONARR_URL, "sonarr_api_key": bool(ENV_SONARR_API_KEY)}
     for k in SECRETS:
         c[k] = ""
     out["auth"] = {"username": out["auth"]["username"]}  # the hash, the cookie secret and the API key stay on the server
@@ -153,9 +204,13 @@ def public(values: dict) -> dict:
 def load() -> dict:
     try:
         with open(_path()) as f:
-            return _merge(DEFAULTS, json.load(f))
+            raw = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return copy.deepcopy(DEFAULTS)
+    out = _merge(DEFAULTS, raw)
+    if "rules" not in ((raw.get("tv") or {}) if isinstance(raw, dict) else {}):  # until TV's rules are saved: the film ones, TV's sizes
+        out["tv"]["rules"] = {**out["rules"], **TV_SIZES}
+    return out
 
 
 def save(patch: dict) -> dict:
@@ -168,13 +223,23 @@ def save(patch: dict) -> dict:
             del conn[k]
         elif k in conn and conn[k] is None:
             conn[k] = ""
-    if isinstance(conn.get("radarr_url"), str):
-        conn["radarr_url"] = conn["radarr_url"].strip().rstrip("/")
+    for k in ("radarr_url", "sonarr_url"):
+        if isinstance(conn.get(k), str):
+            conn[k] = conn[k].strip().rstrip("/")
     with _lock:
         cur = _merge(load(), patch)
+        try:
+            with open(_path()) as f:
+                own = "rules" in (json.load(f).get("tv") or {})
+        except (FileNotFoundError, json.JSONDecodeError, AttributeError):
+            own = False
+        out = copy.deepcopy(cur)
+        if not own and "rules" not in (patch.get("tv") or {}):  # TV's rules follow the film ones until they're saved
+            del out["tv"]["rules"]
+            cur["tv"]["rules"] = {**cur["rules"], **TV_SIZES}
         os.makedirs(DATA, exist_ok=True)
         tmp = _path() + ".tmp"
         with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:  # it holds secrets
-            json.dump(cur, f, indent=1)
+            json.dump(out, f, indent=1)
         os.replace(tmp, _path())
         return cur
