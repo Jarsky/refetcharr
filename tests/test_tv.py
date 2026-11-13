@@ -480,3 +480,13 @@ def test_pause_resume_and_queue_by_kind_over_the_api(both, monkeypatch):
     assert c.patch("/api/settings", json={"tv": {"max_active": 0}}).status_code == 400
     assert c.patch("/api/settings", json={"tv": {"window": {"start": "25:00"}}}).status_code == 400
     assert c.post("/api/queue/clear", json={"kind": "tv"}).status_code == 200 and e.manual_count_tv == 0
+
+
+def test_the_dashboard_feed_finds_grabs_under_many_searches(tv):
+    e = tv()
+    store.log("grab", "Film: grabbed it", id=12)
+    store.log("done", "Show · Season 1: replaced", id=SEASON1)
+    for i in range(150):
+        store.log("suggest", f"Film {i}: 3 replacement(s) to pick from", id=i + 100)
+    feed = e.status()["activity"]
+    assert [(x["kind"], x["item"]) for x in feed] == [("done", "tv"), ("grab", "film")]  # searches and the like stay in Events

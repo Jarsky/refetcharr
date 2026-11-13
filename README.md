@@ -77,9 +77,9 @@ Open `http://<host>:8787`, create the sign-in, then:
 2. **Settings → Sonarr** (optional, for TV): the same for Sonarr (`SONARR_API_KEY` in `.env` works too).
 3. **Library → Flagged**: after the first scan (it starts by itself), look through what was flagged. Open a
    film or season to see why.
-4. Replace a few by hand (**Replace selected**, or **Find replacements** to choose the release yourself), check the
+4. Replace a few by hand (tick them and press **Search**, or **Interactive search** to choose the release yourself), check the
    results under **Activity → Replaced**, then switch on **Auto-queue** when you're happy. TV joins auto-queue only
-   when TV's own auto-queue is on (the top bar, or Settings → Queue & schedule).
+   when TV's own auto-queue is on (the top bar, or Settings → Queue).
 
 A prebuilt image is also published: use `image: ghcr.io/jarsky/refetcharr:latest` in `docker-compose.yml` instead of
 `build: .`.
@@ -87,7 +87,7 @@ A prebuilt image is also published: use `image: ghcr.io/jarsky/refetcharr:latest
 ## How it decides
 
 1. **Flag**: a scan (weekly, or when Radarr imports a file) groups every film: remuxes, 4K or 1080p over the
-   Maximum size, and optionally Low quality and Tiny x265.
+   Maximum size ("too big"), and optionally Low quality and Too small (x265 files under the too-small mark).
 2. **Search**: Radarr searches your indexers for the film.
 3. **Judge**: a release qualifies when it's at most 70% of the current file, at least the Minimum size, the same
    resolution or higher, has enough seeders, rates at least MEDIUM, and keeps HDR, surround, Atmos and English audio.
@@ -97,7 +97,7 @@ A prebuilt image is also published: use `image: ghcr.io/jarsky/refetcharr:latest
    override (it won't replace a file with a smaller one of the same quality by itself), and the old file goes.
 
 Every film is remembered, so nothing is downloaded twice. Films with no qualifying release are listed under
-**Not replaced** and can be retried later.
+**Skipped** and can be retried later.
 
 ### TV
 
@@ -114,13 +114,15 @@ Every film is remembered, so nothing is downloaded twice. Films with no qualifyi
 
 ## Settings
 
-Everything is set in the web UI and saved in `config/settings.json`. The defaults suit most libraries.
+Everything is set in the web UI and saved in `config/settings.json`. The defaults suit most libraries, and the
+less-used settings (codecs, release requirements, exclusions, rating thresholds, timings) only show with **Show
+advanced** on, under Settings in the menu.
 
 | Page | What's there |
 |---|---|
-| **Replacement** | Which groups to go after; what to keep (HDR, surround, Atmos, lossless, English); release groups to leave alone or never download; file sizes (sliders like Radarr's quality sizes); preferred video and audio codecs; seeders. Films and TV each have their own (the release group lists are shared); TV adds Episode by episode |
-| **Quality** | The LOW / MEDIUM / HIGH thresholds per resolution (SD, 720p, 1080p, 4K) and for audio; the least rating a replacement may have; how to pick (smallest HIGH, or nearest the preferred size); codec efficiency. Films and TV each have their own |
-| **Queue & schedule** | Auto-queue, downloads at once, grabs per day, and the days and hours to search in, for films and TV each; the rescan interval |
+| **Rules** | Which groups to go after; what to keep (HDR, surround, Atmos, lossless, English); release groups to leave alone or never download; file sizes (sliders like Radarr's quality sizes); preferred video and audio codecs; seeders. Films and TV each have their own (the release group lists are shared); TV adds Episode by episode |
+| **Ratings** | The LOW / MEDIUM / HIGH thresholds per resolution (SD, 720p, 1080p, 4K) and for audio; the least rating a replacement may have; how to pick (smallest HIGH, or nearest the preferred size); codec efficiency. Films and TV each have their own |
+| **Queue** | Auto-queue, downloads at once, the daily limit, and the days and hours to search in, for films and TV each; when a download counts as stalled; the rescan interval |
 | **Radarr** / **Sonarr** | Each connection, Refetcharr's address for their webhooks, and the setup checks with their fixes |
 | **Timings** | How long to wait on Radarr, Sonarr and qBittorrent before deciding something |
 | **Security** | The sign-in and the API key |

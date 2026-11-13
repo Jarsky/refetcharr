@@ -109,6 +109,7 @@ class Engine:
         self.manual_count = 0  # "queue N now": this many more of the biggest wins (films)
         self.manual_count_tv = 0  # ...and of seasons
         self._tv_turn = False  # films and TV take turns starting searches
+        self._feed_cache, self._feed_at = None, 0.0
         self.upgrades: dict = {}  # films queued again to be put right: id -> {"need": ..., "previous": ...}
         self.episodes: dict = {}  # episode items of seasons replaced episode by episode (no season pack qualified)
         self.busy = ""  # what the worker is doing right now
@@ -223,8 +224,28 @@ class Engine:
                          for mid, e in replaced[:100]],
             "scan": {"at": self.scan_at, "summary": self.scan_summary},
             "tv_scanned": "tv" in self.scan_summary,
-            "activity": [dict(x, item=activity_kind(x)) for x in store.recent(80)],
+            "activity": self._feed(),
         }
+
+    FEED = ("grab", "done", "fail", "warn")  # what the dashboard shows: what happened to titles (the rest is under Events)
+
+    def _feed(self, per_kind: int = 40) -> list:
+        """The dashboard's activity: the latest grabs, replacements, failures and warnings, up to `per_kind` each for films
+        and TV, from the whole log (searches can fill the recent part). Read again at most every 30 seconds."""
+        if self._feed_cache is not None and (store.changed <= self._feed_at or time.time() - self._feed_at < 30):
+            return self._feed_cache
+        out, n = [], {"film": 0, "tv": 0}
+        for x in store.history(5000):
+            if x.get("kind") not in self.FEED:
+                continue
+            k = activity_kind(x) or "film"
+            if n[k] < per_kind:
+                n[k] += 1
+                out.append(dict(x, item=k))
+            if all(v >= per_kind for v in n.values()):
+                break
+        self._feed_cache, self._feed_at = out, time.time()
+        return out
 
     def _kinds(self, s: dict, state: dict, active: list, failed: list, done: list) -> dict:
         """Each kind's queue and numbers, for the top bar and the dashboard tiles."""
@@ -589,7 +610,7 @@ class Engine:
             if x.get("status") != "completed":
                 if e["status"] != "downloading":
                     store.update(mid, status="downloading")
-                self._track_progress(mid, e, x, r)
+                self._track_progress(mid, e, x, s["rules"])  # one stalled limit for films and TV (Settings → Queue)
                 continue
             if e.get("stalled"):
                 store.update(mid, stalled=False)
@@ -890,7 +911,7 @@ class Engine:
     def suggest(self, ids: list) -> str:
         queued = [("suggest", int(i)) for i in ids if ("suggest", int(i)) not in self.jobs]
         self.jobs.extend(queued)
-        return f"Finding replacements for {len(queued)} film(s), one search at a time: they show under Library → Suggestions as they finish."
+        return f"Interactive search for {len(queued)}, one at a time: the results show under Suggestions as each finishes."
 
     def suggest_one(self, mid: int) -> None:
         s = config.for_item(config.load(), mid)
@@ -901,7 +922,7 @@ class Engine:
             return
         if not m.get("movieFile"):
             return
-        self.busy = f"Finding replacements for {m['title']} ({m.get('year')})"
+        self.busy = f"Interactive search for {m['title']} ({m.get('year')})"
         e = store.load().get(str(mid)) or {}
         mode, need = ("upgrade", self.issues(e, m, q)[1]) if e.get("status") == "replaced" else ("", {})
         base, before = self._base(m, s, mode, need, None)

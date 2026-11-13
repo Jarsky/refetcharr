@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.11.0 (2026-11-13)
+
+A calmer interface, closer to Sonarr's and Radarr's: each list has one toolbar, actions show up when you select
+something, and the less-used settings are tucked away.
+
+- **Flagged**: one toolbar (find, **Filter**, **Sort**, List / Covers). The groups, Not tried yet, Show ignored, rating,
+  resolution, HDR and Atmos filters are in the Filter menu, whose button counts what differs from the defaults. Six
+  columns: title, group, format (resolution and HDR; the rest shows on hover and in the details), rating, size, saving.
+  A line over the list says how much is flagged and to win, when it was scanned, with **Rescan library** beside it.
+  **Queue next…** (the biggest wins of the films or TV shown) moved here from the dashboard.
+- **A bar for what's selected**: tick titles and a bar appears at the bottom with what you can do with them (Flagged:
+  Search, Interactive search, Ignore; Replaced: Replace again, Interactive search; Suggestions: Grab picks, Search
+  again, Remove; Skipped: Retry), instead of buttons that sat greyed out in the toolbar.
+- **Suggestions**: the same toolbar; a title's releases no longer repeat the large score cards over the list (each
+  release keeps its own), drop the indexer line, and the releases turned down stay folded until opened.
+- **Dashboard**: the tiles, then downloads and activity. The library scan summary moved to Flagged, and the activity
+  shows what happened to titles (grabbed, replaced, failed, warnings); searches, scans, restarts and settings are
+  under Events.
+- **Show advanced** (Settings, in the menu): codecs, release requirements, exclusions, the rating thresholds, codec
+  efficiency and Timings only show with it on. **Stalled downloads** moved to Settings → Queue, one setting for films
+  and TV.
+- **Plainer names**: Find replacements is **Interactive search** and Replace selected is **Search** (as in Sonarr and
+  Radarr); Not replaced is **Skipped**; the groups 4K / 1080p over the cap are **4K / 1080p too big** and Tiny x265 is
+  **Too small**; Saves about is **Saving**; Grabbed per day is **Daily limit**; By hand is **Manual**; the settings
+  pages Replacement, Quality and Queue & schedule are **Rules**, **Ratings** and **Queue**; Keep from the original is
+  **Must keep** and Leave alone is **Exclusions**.
+
 ## 1.10.0 (2026-11-13)
 
 - **Films and TV run their own queues**: each has its own auto-queue, Pause, downloads at once, grabs per day and

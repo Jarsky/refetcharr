@@ -15,7 +15,7 @@ from . import VERSION
 from .cli import api
 
 C = {"violet": "#9b5cff", "blue": "#3fa0ff", "pink": "#ff2bd6", "mint": "#22f5c8", "cyan": "#22d3ee", "amber": "#ffb020", "dim": "grey62"}
-GROUPS = {"remux": "1080p remuxes", "big4k": "4K over the cap", "remux4k": "4K remuxes", "big1080": "1080p over the cap"}
+GROUPS = {"remux": "1080p remuxes", "big4k": "4K too big", "remux4k": "4K remuxes", "big1080": "1080p too big"}
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _FIG = {}
 
@@ -67,7 +67,7 @@ class Tui:
                      f"[bold]{counts.get('replaced', 0)}[/]\n[grey62]replaced[/]",
                      f"[bold {C['cyan']}]{len(s['active'])}[/][grey62]/{s['limits']['max_active']}[/]\n[grey62]downloading[/]",
                      f"[bold]{s['today']}[/][grey62]/{s['limits']['max_per_day'] or '∞'}[/]\n[grey62]grabbed today[/]",
-                     f"[bold {C['pink']}]{len(s['failed'])}[/]\n[grey62]not replaced[/]")
+                     f"[bold {C['pink']}]{len(s['failed'])}[/]\n[grey62]skipped[/]")
         info = f"{state}   [grey62]·[/]   " + (f"[{C['cyan']}]{s['busy']}…[/]" if s["busy"] else "[grey62]idle[/]")
         w = s["waiting"]
         if w["ids"] or w["count"]:
@@ -209,7 +209,7 @@ class Tui:
             t = Table(box=box.ROUNDED, border_style=C["mint"], header_style=C["dim"], title=title)
             for col in ("group", unit, "space", "to win"):
                 t.add_column(col, justify="right" if col != "group" else "left")
-            for k, label in {**GROUPS, "tiny": "Tiny x265 (need bigger)"}.items():
+            for k, label in {**GROUPS, "tiny": "Too small (need bigger)"}.items():
                 v = summary.get(k)
                 if v:
                     t.add_row(label, str(v["films"]), f"{v['gb'] / 1000:.1f} TB", "-" if k == "tiny" else f"{v['saving_gb'] / 1000:.1f} TB")
@@ -263,7 +263,7 @@ class Tui:
 MENU = [
     ("Dashboard (live)", "live"), ("Queue the next N biggest wins", "queue_count"), ("Queue particular films", "queue_pick"),
     ("Auto-queue on / off", "toggle_auto"), ("Pause / resume", "pause_resume"), ("Limits: at once and per day", "limits"),
-    ("Which kinds of win to go after", "groups"), ("Schedule (days and hours)", "window"), ("Films not replaced: retry", "failed"),
+    ("Which kinds of win to go after", "groups"), ("Schedule (days and hours)", "window"), ("Skipped: retry", "failed"),
     ("Oversized films in the library", "oversized"), ("Rescan the library", "scan"), ("Rules: seeders and sizes", "rules"),
     ("Radarr connection and setup", "radarr_setup"), ("Sonarr connection and setup (TV)", "sonarr_setup"),
 ]

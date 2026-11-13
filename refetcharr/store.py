@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import threading
+import time
 
 from . import config
 
@@ -15,6 +16,7 @@ DONE = ("replaced",)
 _lock = threading.RLock()
 _log: collections.deque = collections.deque(maxlen=300)
 _loaded = False  # the activity history is read from disk once, before anything new is added
+changed = 0.0  # when the activity log last grew (the dashboard's feed is read again after that)
 
 
 def _file(name: str) -> str:
@@ -92,6 +94,8 @@ def log(kind: str, text: str, **extra) -> None:
         _load_log()
         _log.append(item)
         os.makedirs(config.DATA, exist_ok=True)
+        global changed
+        changed = time.time()
         with open(_file("activity.jsonl"), "a") as f:
             f.write(json.dumps(item) + "\n")
 

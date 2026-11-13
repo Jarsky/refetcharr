@@ -13,10 +13,10 @@ from . import quality
 
 GROUPS = {
     "remux": "1080p remuxes",
-    "big4k": "4K over the cap",
+    "big4k": "4K too big",
     "remux4k": "4K remuxes",
-    "big1080": "1080p over the cap",
-    "tiny": "Tiny x265",  # these need a bigger file, not a smaller one (off unless switched on)
+    "big1080": "1080p too big",
+    "tiny": "Too small",  # these need a bigger file, not a smaller one (off unless switched on)
     "lowq": "Low quality",  # the picture rates LOW for its resolution: these need a better file, of any size
 }
 SHRINKABLE = ("remux", "big4k", "remux4k", "big1080")

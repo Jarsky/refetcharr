@@ -1,6 +1,6 @@
 // Refetcharr web UI: polls /api/status, renders the tabs, and sends actions to the same API the TUI uses.
-const GROUPS = { remux: ["1080p remuxes", "var(--violet)"], big4k: ["4K over the cap", "var(--amber)"],
-  remux4k: ["4K remuxes", "var(--pink)"], big1080: ["1080p over the cap", "var(--blue)"], tiny: ["Tiny x265", "var(--mint)"],
+const GROUPS = { remux: ["1080p remuxes", "var(--violet)"], big4k: ["4K too big", "var(--amber)"],
+  remux4k: ["4K remuxes", "var(--pink)"], big1080: ["1080p too big", "var(--blue)"], tiny: ["Too small", "var(--mint)"],
   lowq: ["Low quality", "var(--red)"], upgrade: ["Put right", "var(--cyan)"] };
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const $ = (id) => document.getElementById(id);
@@ -135,8 +135,8 @@ const recheck = (id) => tracked.get(id).check();
 // ── tabs ──────────────────────────────────────────────────────────────────
 const TAB_GROUP = { dashboard: "dashboard", library: "library", suggestions: "library", replaced: "activity", failed: "activity", events: "activity",
   replacement: "settings", quality: "settings", queue: "settings", radarr: "settings", sonarr: "settings", timings: "settings", security: "settings" };
-const TAB_TITLE = { dashboard: "Dashboard", library: "Flagged", suggestions: "Suggestions", replaced: "Replaced", failed: "Not replaced", events: "Events",
-  replacement: "Replacement", quality: "Quality", queue: "Queue & schedule", radarr: "Radarr", sonarr: "Sonarr", timings: "Timings", security: "Security" };
+const TAB_TITLE = { dashboard: "Dashboard", library: "Flagged", suggestions: "Suggestions", replaced: "Replaced", failed: "Skipped", events: "Events",
+  replacement: "Rules", quality: "Ratings", queue: "Queue", radarr: "Radarr", sonarr: "Sonarr", timings: "Timings", security: "Security" };
 const currentTab = () => { const t = (location.hash || "#dashboard").slice(1); return t === "settings" ? "radarr" : TAB_GROUP[t] ? t : "dashboard"; };
 function showTab() {
   const tab = currentTab();
@@ -172,7 +172,7 @@ function renderControls(s) {
   for (const k of ["films", "tv"]) {
     const q = s.kinds?.[k]; if (!q) continue;
     const name = k === "tv" ? "TV" : "Films";
-    const mode = q.auto ? (q.in_window ? "Auto" : "Auto · waiting") : "By hand";
+    const mode = q.auto ? (q.in_window ? "Auto" : "Auto · waiting") : "Manual";
     const modeTip = q.auto ? (q.in_window ? `${name}: auto-queue keeps ${q.max_active} at once topped up. Click for by hand` : `${name}: auto-queue, outside its schedule. Click for by hand`)
       : `${name}: only what you queue. Click to keep downloads topped up by itself`;
     $(`ctl-${k}`).innerHTML = `${tv ? `<span class="qctl-name"><span class="band-dot ${k === "tv" ? "tv" : "film"}"></span>${name}</span>` : ""}
@@ -224,7 +224,7 @@ async function refresh() {
   $("s-today-label").innerHTML = "grabbed today" + (split ? splitLine(`${K.films.today}/${K.films.max_per_day || "∞"}`, `${K.tv.today}/${K.tv.max_per_day || "∞"}`) : "");
   $("s-replaced-label").innerHTML = "replaced" + (split ? splitLine(K.films.replaced, K.tv.replaced) : "");
   $("s-failed").textContent = s.failed.length;
-  $("s-failed-label").innerHTML = "not replaced" + (split ? splitLine(K.films.failed, K.tv.failed) : "");
+  $("s-failed-label").innerHTML = "skipped" + (split ? splitLine(K.films.failed, K.tv.failed) : "");
   renderControls(s);
   const waiting = s.waiting.ids.length + s.waiting.count + (s.waiting.count_tv || 0);
   $("busy").textContent = (s.busy ? s.busy + "…" : "Idle") + (waiting ? ` · ${waiting} waiting to search` : "")
@@ -244,25 +244,16 @@ async function refresh() {
   const films = bands ? s.active.filter((a) => !isTv(a)) : s.active, tvs = s.active.filter(isTv);
   renderDownloads("active", films, bands ? "No films downloading." : "Nothing downloading.");
   const feed = (box, want) => {
-    const rows = s.activity.filter((x) => !bands || !x.item || x.item === want).slice(0, 40);
+    const rows = s.activity.filter((x) => !bands || x.item === want).slice(0, 40);
     $(box).innerHTML = rows.map((x) => `<li class="${bands && !x.item ? "general" : ""}"><time>${esc(x.time.slice(5, 16))}</time><span class="${esc(x.kind)}">${esc(x.text)}</span></li>`).join("")
-      || `<li class="empty">Nothing yet.</li>`;
+      || `<li class="empty">Nothing replaced or grabbed yet.</li>`;
   };
   feed("activity", "film");
   if (bands) { renderDownloads("active-tv", tvs, "No TV downloading."); feed("activity-tv", "tv"); }
   const stalledOf = (xs) => xs.filter((a) => a.stalled).length;
   const slotText = (xs, k) => (xs.length && s.kinds?.[k] ? `· ${xs.length - stalledOf(xs)} of ${s.kinds[k].max_active} at once${stalledOf(xs) ? `, ${stalledOf(xs)} stalled` : ""}` : "");
 
-  const sum = s.scan.summary || {};
-  $("scan-at").textContent = s.scan.at ? `· ${s.scan.at.replace("T", " ")}` : "· not scanned yet";
-  const tiles = (sm, unit, groups) => Object.entries(GROUPS).filter(([k]) => sm?.[k]).map(([k, [label, col]]) =>
-    `<div class="group" style="--c:${col}"><b>${label}</b><span>${sm[k].films} ${unit} · ${(sm[k].gb / 1000).toFixed(1)} TB</span>
-     <span>${k === "tiny" ? `need bigger files${groups?.tiny ? " · going after them" : " · switched off"}` : `about ${(sm[k].saving_gb / 1000).toFixed(1)} TB to win`}</span></div>`).join("");
-  const filmTiles = tiles(sum, "films", s.groups), tvTiles = s.tv && sum.tv ? tiles(sum.tv, "seasons", s.tv_groups) : "";
-  $("scan-summary").innerHTML = (filmTiles && tvTiles ? `<h3 class="groups-h">Films</h3>` : "") + filmTiles
-    + (tvTiles ? `<h3 class="groups-h">TV</h3>${tvTiles}` : "")
-    + (s.tv && !s.tv_scanned ? `<p class="muted small groups-h">TV shows here after the next rescan.</p>` : "")
-    || `<p class="empty">Run a scan to see the library's oversized films${s.tv ? " and seasons" : ""}.</p>`;
+  renderLibSummary();
 
   $("active-tv-count").textContent = slotText(tvs, "tv");
   $("active-count").textContent = bands ? slotText(films, "films")
@@ -298,7 +289,7 @@ function renderFailed() {
   $("retry-all").disabled = !rows.length;
   updateRetrySel();
 }
-function updateRetrySel() { $("retry-sel").disabled = !document.querySelectorAll("#fail-rows input:checked").length; }
+function updateRetrySel() { selbar("fail", document.querySelectorAll("#fail-rows input:checked").length); }
 $("fail-rows").addEventListener("change", updateRetrySel);
 $("fail-all").addEventListener("change", (e) => { document.querySelectorAll("#fail-rows input").forEach((i) => (i.checked = e.target.checked)); updateRetrySel(); });
 $("retry-sel").addEventListener("click", () => act(async () => {
@@ -330,9 +321,7 @@ function renderReplaced() {
 }
 function updateDoneSel() {
   const n = document.querySelectorAll("#done-rows input:checked").length;
-  $("done-again").disabled = $("done-suggest").disabled = !n;
-  $("done-again").textContent = n ? `Replace ${n} again` : "Replace again";
-  $("done-suggest").textContent = n ? `Find replacements for ${n}` : "Find replacements";
+  selbar("done", n);
 }
 $("done-rows").addEventListener("change", updateDoneSel);
 $("done-all").addEventListener("change", (e) => { document.querySelectorAll("#done-rows input").forEach((i) => (i.checked = e.target.checked)); updateDoneSel(); });
@@ -376,6 +365,21 @@ function shownFilms() {
       && (!fhdr || (f.dynamic_range && f.dynamic_range !== "SDR" ? "1" : "0") === fhdr) && (!fat || (f.atmos ? "1" : "0") === fat))
     .sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * dir);
 }
+// the one-line scan summary over the Flagged list (1.11.0: in place of the dashboard's scan tiles)
+function renderLibSummary() {
+  if (!status) return;
+  const tv = kindOf("view") === "tv", sm = (tv ? status.scan.summary?.tv : status.scan.summary) || {};
+  const flagged = Object.entries(sm).filter(([k]) => GROUPS[k]).reduce((t, [, v]) => t + v.films, 0);
+  const win = Object.entries(sm).filter(([k]) => GROUPS[k] && k !== "tiny" && k !== "lowq").reduce((t, [, v]) => t + v.saving_gb, 0);
+  const lib = sm._library;
+  $("lib-summary").innerHTML = !status.scan.at ? "Not scanned yet."
+    : tv && !status.tv_scanned ? "TV is listed after the next rescan."
+    : `<b>${flagged.toLocaleString()}</b> of ${(lib?.films || 0).toLocaleString()} ${tv ? "seasons" : "films"} flagged · about <b>${(win / 1000).toFixed(1)} TB</b> to win
+       <span class="muted">· scanned ${esc(status.scan.at.replace("T", " ").slice(0, 16))}</span>`;
+}
+// a title's format, short: resolution and HDR ("4K · DV")
+const hdrShort = (d) => (!d || d === "SDR" ? "" : /DV|Dolby/i.test(d) ? "DV" : /10\+|Plus/i.test(d) ? "HDR10+" : /HLG/i.test(d) ? "HLG" : "HDR");
+const formatCell = (f) => [resLabel(f.resolution), hdrShort(f.dynamic_range)].filter(Boolean).join(" · ");
 const savingCell = (f) => (f.group === "tiny" ? `<span class="grew" title="Needs a bigger file">+${(-f.saving_gb).toFixed(1)} GB</span>` : f.saving_gb > 0 ? `saves ${f.saving_gb.toFixed(1)} GB` : "");
 function filmCover(f) {
   const [label, col] = GROUPS[f.group] || [f.group, "var(--line)"], canPick = !f.refetch;
@@ -395,29 +399,84 @@ function renderFilms() {
     const [label, col] = GROUPS[f.group] || [f.group, "var(--line)"], canPick = !f.refetch;
     const link = itemLink(f);
     return xrow("lib-rows", f.id, `<td class="pick">${canPick ? `<input type="checkbox" value="${f.id}" data-ignored="${f.ignored ? 1 : ""}" aria-label="Select ${esc(f.title)}">` : ""}</td>
-      <td><a href="${esc(link)}" target="_blank" rel="noopener">${esc(f.title)}</a><span class="yr">${f.year || ""}</span>${epCount(f)}${f.release_group ? `<span class="rg">${esc(f.release_group)}</span>` : ""}${f.mixed ? ' <span class="tag" title="Its episodes are in more than one quality: the one most of its size is in is shown">mixed</span>' : ""}</td>
-      <td><span class="tag" style="--c:${col}">${label}</span></td><td>${esc(f.quality)} · ${esc(f.video_codec)}${f.dynamic_range && f.dynamic_range !== "SDR" ? " · " + esc(f.dynamic_range) : ""}${f.audio ? ` · ${esc(audioLabel(f.audio))} ${chans(f.channels)}${f.atmos ? " Atmos" : ""}` : ""}</td>
+      <td><a href="${esc(link)}" target="_blank" rel="noopener">${esc(f.title)}</a><span class="yr">${f.year || ""}</span>${epCount(f)}${f.refetch ? ` <span class="tag">${esc(f.refetch)}</span>` : ""}${f.ignored ? ` <span class="tag" title="${esc(f.ignored)}">Ignored</span>` : ""}</td>
+      <td><span class="tag" style="--c:${col}">${label}</span></td>
+      <td class="nowrap" title="${esc([f.quality, f.video_codec, f.dynamic_range, f.audio ? `${audioLabel(f.audio)} ${chans(f.channels)}${f.atmos ? " Atmos" : ""}` : ""].filter(Boolean).join(" · "))}">${esc(formatCell(f))}${f.mixed ? ' <span class="tag" title="Its episodes are in more than one quality: the one most of its size is in is shown">mixed</span>' : ""}</td>
       <td>${rp(f)}</td>
-      <td class="r">${f.size_gb.toFixed(1)} GB</td><td class="r">${f.mb_per_min}</td>
-      <td class="r">${f.group === "tiny" ? `<span class="grew" title="Needs a bigger file">+${(-f.saving_gb).toFixed(1)} GB</span>` : f.saving_gb > 0 ? f.saving_gb.toFixed(1) + " GB" : "–"}</td>
-      <td>${f.refetch ? `<span class="tag">${esc(f.refetch)}</span>` : ""}${f.ignored ? `<span class="tag" title="${esc(f.ignored)}">Ignored</span>` : ""}</td>`, f.ignored ? "ignored" : "");
-  }).join("") || `<tr><td colspan="9" class="empty">No ${kindOf("lib") === "tv" ? "seasons" : "films"} match.${kindOf("lib") === "tv" && status?.tv && !status.tv_scanned ? " TV is listed after the next rescan." : ""}</td></tr>`;
+      <td class="r">${f.size_gb.toFixed(1)} GB</td>
+      <td class="r">${f.group === "tiny" ? `<span class="grew" title="Needs a bigger file">+${(-f.saving_gb).toFixed(1)} GB</span>` : f.saving_gb > 0 ? f.saving_gb.toFixed(1) + " GB" : "–"}</td>`, f.ignored ? "ignored" : "");
+  }).join("") || `<tr><td colspan="7" class="empty">No ${kindOf("lib") === "tv" ? "seasons" : "films"} match.${kindOf("lib") === "tv" && status?.tv && !status.tv_scanned ? " TV is listed after the next rescan." : ""}</td></tr>`;
   const save = v.filter((f) => f.group !== "tiny").reduce((t, f) => t + Math.max(f.saving_gb, 0), 0);
   const tvNow = kindOf("lib") === "tv";
   $("lib-th-title").textContent = tvNow ? "Season" : "Film";
-  $("lib-count").textContent = `${v.length.toLocaleString()} ${tvNow ? "seasons" : "films"} · about ${(save / 1000).toFixed(1)} TB to win`;
+  $("lib-count").textContent = `${v.length.toLocaleString()} shown · about ${(save / 1000).toFixed(1)} TB`;
+  $("lib-sort").value = [...$("lib-sort").options].some((o) => o.value === libSort.join(":")) ? libSort.join(":") : $("lib-sort").value;
+  $("queue-unit").textContent = tvNow ? "seasons" : "films";
+  paintFilterCount();
+  renderLibSummary();
   $("lib-more").hidden = v.length <= libShown;
   document.querySelectorAll("#tab-library th[data-sort]").forEach((th) => { th.classList.toggle("sorted", th.dataset.sort === libSort[0]); th.classList.toggle("asc", th.dataset.sort === libSort[0] && libSort[1] > 0); });
   updateLibQueue();
 }
 function updateLibQueue() {
   const picked = libPicked(), n = picked.length, allIgnored = n && picked.every((i) => i.dataset.ignored);
-  $("lib-queue").disabled = !n; $("lib-queue").textContent = n ? `Replace ${n} selected` : "Replace selected";
-  $("lib-ignore").disabled = !n; $("lib-ignore").textContent = n ? `${allIgnored ? "Stop ignoring" : "Ignore"} ${n} selected` : "Ignore selected";
+  selbar("lib", n);
+  $("lib-ignore").textContent = allIgnored ? "Stop ignoring" : "Ignore";
   $("lib-ignore").dataset.mode = allIgnored ? "off" : "on";
-  $("lib-suggest").disabled = !n; $("lib-suggest").textContent = n ? `Find replacements for ${n}` : "Find replacements";
   renderLibEst();
 }
+// ── 1.11.0: menus (Filter, Queue next), the selection bar, the advanced switch ──
+function selbar(page, n) {
+  $(`${page}-selbar`).hidden = !n;
+  $(`${page}-sel-n`).textContent = `${n} selected`;
+}
+document.addEventListener("click", (e) => {
+  const u = e.target.closest("[data-unselect]");
+  if (u) {
+    const page = u.dataset.unselect, box = { lib: "#lib-rows, #lib-grid", done: "#done-rows", sg: "#sg-rows, #sg-grid", fail: "#fail-rows" }[page];
+    document.querySelectorAll(box.split(", ").map((b) => `${b} input:checked`).join(", ")).forEach((i) => (i.checked = false));
+    document.querySelectorAll(`#${page}-all, #${page}-all-c`).forEach((i) => (i.checked = false));
+    ({ lib: updateLibQueue, done: updateDoneSel, sg: updateSgSel, fail: updateRetrySel })[page]();
+    return;
+  }
+  const b = e.target.closest("[data-menu]");
+  const open = document.querySelector(".menu:not([hidden])");
+  if (b) {
+    const m = $(b.dataset.menu), show = m.hidden;
+    if (open && open !== m) { open.hidden = true; document.querySelector(`[data-menu="${open.id}"]`)?.setAttribute("aria-expanded", "false"); }
+    m.hidden = !show; b.setAttribute("aria-expanded", show);
+    return;
+  }
+  if (open && !e.target.closest(".menu")) { open.hidden = true; document.querySelector(`[data-menu="${open.id}"]`)?.setAttribute("aria-expanded", "false"); }
+});
+document.addEventListener("keydown", (e) => {
+  const open = document.querySelector(".menu:not([hidden])");
+  if (e.key === "Escape" && open) { open.hidden = true; document.querySelector(`[data-menu="${open.id}"]`)?.focus(); }
+});
+const DEFAULT_GROUPS = ["remux", "big4k", "remux4k", "big1080", "lowq"];
+function paintFilterCount() {   // how many filters differ from the defaults, on the Filter button
+  const lib = [$("lib-f-rating"), $("lib-f-res"), $("lib-f-hdr"), $("lib-f-atmos")].filter((x) => x.value).length
+    + (!$("lib-untried").checked) + $("lib-ignored").checked
+    + (DEFAULT_GROUPS.some((g) => !libGroups.has(g)) || [...libGroups].some((g) => !DEFAULT_GROUPS.includes(g)) ? 1 : 0);
+  const sg = [$("sg-f-show"), $("sg-f-rating"), $("sg-f-res")].filter((x) => x.value).length;
+  $("lib-filter-n").textContent = lib || ""; $("sg-filter-n").textContent = sg || "";
+}
+$("lib-filter-reset").addEventListener("click", () => {
+  for (const id of ["lib-f-rating", "lib-f-res", "lib-f-hdr", "lib-f-atmos"]) $(id).value = "";
+  $("lib-untried").checked = true; $("lib-ignored").checked = false;
+  libGroups.clear(); DEFAULT_GROUPS.forEach((g) => libGroups.add(g));
+  document.querySelectorAll("#lib-groups .chip").forEach((c) => c.setAttribute("aria-pressed", libGroups.has(c.dataset.g)));
+  libShown = 200; renderFilms();
+});
+$("sg-filter-reset").addEventListener("click", () => { for (const id of ["sg-f-show", "sg-f-rating", "sg-f-res"]) $(id).value = ""; renderSuggestions(); });
+$("lib-sort").addEventListener("change", (e) => { const [k, d] = e.target.value.split(":"); libSort = [k, +d]; renderFilms(); });
+const ADV_KEY = "refetcharr-advanced";
+function setAdvanced(on) {
+  document.body.classList.toggle("adv", on); $("adv").checked = on;
+  try { localStorage.setItem(ADV_KEY, on ? "1" : ""); } catch { /* private window */ }
+}
+$("adv").addEventListener("change", (e) => setAdvanced(e.target.checked));
+setAdvanced((() => { try { return localStorage.getItem(ADV_KEY) === "1"; } catch { return false; } })());
 
 // ── 1.7.0: profiles and what a selection would save ───────────────────────
 let profiles = null, liveRules = null, liveTvRules = null, estWith = "current";
@@ -520,7 +579,7 @@ $("lib-queue").addEventListener("click", () => act(async () => {
 }));
 
 // ── actions ───────────────────────────────────────────────────────────────
-$("queue-form").addEventListener("submit", (e) => { e.preventDefault(); act(() => api("POST", "/api/queue", { count: +$("queue-n").value, kind: kindOf("queue") })); });
+$("queue-form").addEventListener("submit", (e) => { e.preventDefault(); act(async () => { const r = await api("POST", "/api/queue", { count: +$("queue-n").value, kind: kindOf("view") }); $("lib-queue-menu").hidden = true; return r; }); });
 $("queue-clear").addEventListener("click", () => act(() => api("POST", "/api/queue/clear", { kind: "all" })));
 $("scan").addEventListener("click", () => { $("scan-confirm").returnValue = "cancel"; $("scan-confirm").showModal(); });
 $("scan-confirm").addEventListener("close", () => { if ($("scan-confirm").returnValue === "scan") act(() => api("POST", "/api/scan")); });
@@ -555,6 +614,7 @@ async function loadSettings() {
   }
   document.querySelector('.qcol[data-q="tv"]').hidden = !(settings.secrets_set.sonarr_api_key && settings.tv.enabled);
   f.every_days.value = settings.scan.every_days;
+  f.stall_warn_hours.value = settings.rules.stall_warn_hours; paintStall();
   fillTiming(settings.timing);
   const sec = $("security");
   sec.username.value = settings.auth.username; sec.password.value = sec.confirm.value = sec.current.value = "";
@@ -655,12 +715,14 @@ for (const app of ["radarr", "sonarr"]) {
   $(`${p}setup-refresh`).addEventListener("click", () => loadSetup(true, app));
 }
 document.querySelectorAll("[data-days]").forEach((box) => box.addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (b) b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true"); }));
+function paintStall() { const v = +$("settings").stall_warn_hours.value; $("settings").stall_warn_hours_o.value = v ? `${v} hour${v === 1 ? "" : "s"}` : "never"; }
+$("settings").addEventListener("input", (e) => { if (e.target.name === "stall_warn_hours") paintStall(); });
 function settingsPatch() {
   const f = $("settings"), num = (n) => Number(f[n].value);
   const q = (k) => ({ auto: f[`${k}_auto`].checked, max_active: num(`${k}_max_active`), max_per_day: num(`${k}_max_per_day`),
     window: { enabled: f[`${k}_w_enabled`].checked, start: f[`${k}_w_start`].value || "00:00", end: f[`${k}_w_end`].value || "23:59",
       days: [...document.querySelectorAll(`[data-days="${k}"] .chip`)].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => +b.dataset.d) } });
-  return { queue: q("films"), tv: q("tv"), scan: { every_days: num("every_days") } };
+  return { queue: q("films"), tv: q("tv"), scan: { every_days: num("every_days") }, rules: { stall_warn_hours: num("stall_warn_hours") } };
 }
 $("settings").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -678,7 +740,6 @@ const RANGES = {
   max_ratio: [(v) => `${v}%`, (r) => Math.round(r.max_ratio * 100), (v) => v / 100],
   min_runtime: [(v) => (v ? `${v} min` : "no limit")],
   min_seeders: [(v) => `${v} seeder${v === 1 ? "" : "s"}`],
-  stall_warn_hours: [(v) => (v ? `${v} hour${v === 1 ? "" : "s"}` : "never")],
 };
 let catalog = { video: [], audio: [] }, ruleDefaults = null;
 const codecLists = { video: [], audio: [] }, strict = { video: false, audio: false };
@@ -751,7 +812,7 @@ $("rules").addEventListener("input", (e) => { if (RANGES[e.target.name]) paintRa
 
 const GROUP_KEYS = ["remux", "big4k", "remux4k", "big1080", "tiny", "lowq"];
 const GROUP_NOTE = { tiny: "x265 files under Too small, swapped for a bigger release (up to Maximum). These use more space, not less, and come after the savings",
-  lowq: "files whose picture rates LOW for their resolution (Settings → Quality), swapped for a better release of any size up to Maximum" };
+  lowq: "files whose picture rates LOW for their resolution (Settings → Ratings), swapped for a better release of any size up to Maximum" };
 const igLists = { file_groups: [], release_groups: [] };
 function renderTags(k) {
   $(`ig-${k}`).innerHTML = `<div class="chips">${igLists[k].map((g, i) => `<span class="chip on">${esc(g)}<button type="button" class="x" data-del="${i}" aria-label="Remove ${esc(g)}">✕</button></span>`).join("")
@@ -765,7 +826,7 @@ for (const k of Object.keys(igLists)) {
   box.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches(".other")) { e.preventDefault(); add(); } });
 }
 async function renderIgnoredFilms(ids) {
-  if (!ids.length) { $("ig-films").innerHTML = `<p class="muted small">None. Pick films or seasons under Flagged and press Ignore selected.</p>`; return; }
+  if (!ids.length) { $("ig-films").innerHTML = `<p class="muted small">None. Tick titles under Flagged and press Ignore.</p>`; return; }
   if (!films.length) { try { films = await api("GET", "/api/films"); } catch { /* names fall back to ids */ } }
   const name = (id) => { const f = films.find((x) => x.id === id); return f ? `${esc(f.title)} <span class="yr">${f.year || ""}</span>` : id >= 1e9 ? `TV item ${id}` : `Radarr film ${id}`; };
   $("ig-films").innerHTML = `<ul class="iglist">${ids.map((id) => `<li><span>${name(id)}</span><button type="button" class="btn ghost" data-unignore="${id}">Stop ignoring</button></li>`).join("")}</ul>`;
@@ -987,7 +1048,7 @@ function renderDetail(d) {
       ${rej.length ? `<div><h4>Turned down (${rej.length}${dec.releases ? ` of ${dec.releases}` : ""})</h4><ul class="rej">${rej.slice(0, 8).map((n) => `<li>${split(n)}</li>`).join("")}</ul>
         ${rej.length > 8 ? `<details><summary class="muted small">${rej.length - 8} more</summary><ul class="rej">${rej.slice(8).map((n) => `<li>${split(n)}</li>`).join("")}</ul></details>` : ""}</div>` : ""}
     </div>` : ""}
-    <div class="dd-actions">${PENDING.includes(st.status) ? "" : `<button type="button" class="btn" data-suggest="${d.id}">Find replacements</button>`}
+    <div class="dd-actions">${PENDING.includes(st.status) ? "" : `<button type="button" class="btn" data-suggest="${d.id}">Interactive search</button>`}
       ${done ? `<button type="button" class="btn" data-requeue="${d.id}">Replace again</button>` : ""}</div>
     ${legacy ? `<p class="note">${done ? "Replaced" : "Tried"} before Refetcharr 1.5, which didn't record ${done ? "the original file's details or " : ""}why each release was chosen or turned down.${done ? "" : " Retry it to see the reasons."}</p>` : ""}
   </div>`;
@@ -1142,7 +1203,6 @@ function optionCard(sg, o, i) {
       title="${on ? "Your pick: Grab takes this one" : "Click to pick this release"}">
     <div class="opt-main">
       <div class="opt-title"><span class="radio" aria-hidden="true"></span>${i ? "" : '<span class="pill-best">Best pick</span>'}${on && i ? '<span class="pill-pick">Your pick</span>' : ""}<span class="name">${esc(o.title)}</span></div>
-      <div class="opt-meta">${esc([o.indexer, o.release_group, o.score ? `format score ${o.score}` : ""].filter(Boolean).join(" · "))}</div>
       <div class="facts">${facts(o)}</div>
     </div>
     <div class="opt-side">${miniCard(o)}<span class="opt-save">${saveText(o.saving)}</span></div>
@@ -1156,21 +1216,18 @@ function choosePick(id, guid) {
 }
 function suggDetail(sg) {
   const rej = sg.rejected || [], pick = sg.options.length ? pickOf(sg) : null;
-  const cards = [ratingCard(sg.before, "Now on disk"), pick ? ratingCard(pick, pick === sg.options[0] ? "Best pick" : "Your pick") : ""].filter(Boolean);
   return `<div class="dd">
     <div class="dd-head"><b>${esc(sg.title)} <span class="yr">${sg.year || ""}</span></b><span class="muted small">searched ${esc(sg.at)} · ${sg.releases} ${sg.kind === "season" ? "season packs" : "releases"}, ${sg.options.length} qualify</span></div>
     ${sg.flagged ? `<p class="dd-flag"><b>${sg.mode === "upgrade" ? "Putting right" : "Flagged"}</b>${esc(sg.flagged)}</p>` : ""}
-    ${cards.length ? `<div class="rcards ${cards.length > 1 ? "vs" : ""}">${cards.join('<span class="rarrow" aria-hidden="true">→</span>')}</div>`
-      : ""}
     <div class="opt now"><div class="opt-main"><div class="opt-title"><span class="pill-now">Now on disk</span><span class="name">${sg.kind === "season" && sg.episodes ? `${sg.episodes} episodes, such as ` : ""}${esc(sg.before.name || sg.before.quality || "")}</span></div>
       <div class="facts">${facts(sg.before)}</div></div><div class="opt-side">${miniCard(sg.before)}<span class="opt-save muted">${size(sg.before.size)}</span></div></div>
     ${sg.options.length ? `<div class="opts" role="radiogroup" aria-label="Releases for ${esc(sg.title)}">${sg.options.map((o, i) => optionCard(sg, o, i)).join("")}</div>
-      <div class="opt-grab"><span class="muted small">Click a release to pick it: the pick is remembered for Grab picks.</span>
+      <div class="opt-grab"><span class="muted small">Click a release to pick it.</span>
         <button type="button" class="btn primary sm" data-pick="${sg.id}" data-guid="${esc(pick.guid)}">Grab ${pick === sg.options[0] ? "the best pick" : "your pick"} · ${size(pick.size)}</button></div>`
-      : `<p class="problem">Nothing qualified of ${sg.releases} releases. The reasons are below.</p>`}
+      : `<p class="problem">Nothing qualified of ${sg.releases} releases.</p>`}
     <div class="dd-cols">
       ${sg.why?.length ? `<div><h4>Why the best pick</h4><ul>${sg.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
-      ${rej.length ? `<div><details ${sg.options.length ? "" : "open"}><summary class="muted small">${rej.length} turned down</summary><ul class="rej">${rej.map((n) => { const m = /^(.*?): (.*)$/.exec(n); return `<li>${m ? `<b>${esc(m[1])}</b>: ${esc(m[2])}` : esc(n)}</li>`; }).join("")}</ul></details></div>` : ""}
+      ${rej.length ? `<div><details><summary class="muted small">${rej.length} turned down, and why</summary><ul class="rej">${rej.map((n) => { const m = /^(.*?): (.*)$/.exec(n); return `<li>${m ? `<b>${esc(m[1])}</b>: ${esc(m[2])}` : esc(n)}</li>`; }).join("")}</ul></details></div>` : ""}
     </div></div>`;
 }
 // what the list shows (1.8.0): find a title, filter, sort
@@ -1231,18 +1288,19 @@ function renderSuggestions() {
       <td class="r nowrap">${best ? saveText(best.saving) : "–"}</td>
       <td class="r">${sg.options.length}</td><td class="muted small nowrap">${esc(sg.at)}</td></tr>`
       + (open ? `<tr class="detail" data-for="${sg.id}"><td colspan="7">${suggDetail(sg)}</td></tr>` : "");
-  }).join("") || `<tr><td colspan="7" class="empty">${sugg.length ? "No suggestions match." : "No suggestions yet. Pick films or seasons under Flagged (or Replaced) and press Find replacements."}</td></tr>`;
+  }).join("") || `<tr><td colspan="7" class="empty">${sugg.length ? "No suggestions match." : "No suggestions yet. Tick titles under Flagged (or Replaced) and press Interactive search."}</td></tr>`;
   const ofThis = sugg.filter(ofKind("sg")).length;
   $("sg-count").textContent = sugg.length ? `${v.length.toLocaleString()} of ${ofThis.toLocaleString()} ${kindOf("sg") === "tv" ? "seasons" : "films"}` : "";
   $("sg-busy").textContent = status?.suggesting ? `${status.suggesting} still to search…` : "";
+  paintFilterCount();
   if (dlgSugg != null && $("film-dlg").open) { const sg = sugg.find((s) => s.id === dlgSugg); if (sg) $("film-dlg-body").innerHTML = suggDetail(sg); }
   updateSgSel();
 }
 function updateSgSel() {
   const picked = pickedSg(), n = picked.length;
   const sel = sugg.filter((s) => picked.includes(s.id) && s.options.length);
-  $("sg-again").disabled = $("sg-clear").disabled = !n;
-  $("sg-grab").disabled = !sel.length; $("sg-grab").textContent = sel.length ? `Grab ${sel.length} pick${sel.length === 1 ? "" : "s"}` : "Grab picks";
+  selbar("sg", n);
+  $("sg-grab").disabled = !sel.length; $("sg-grab").textContent = sel.length ? `Grab ${sel.length} pick${sel.length === 1 ? "" : "s"}` : "Nothing to grab";
   let now = 0, after = 0, freed = 0, added = 0;
   const ratingsBefore = [], ratingsAfter = [];
   for (const s of sel) {
@@ -1253,7 +1311,7 @@ function updateSgSel() {
   }
   $("sg-est").hidden = !sel.length;
   if (sel.length) {
-    $("sg-est").innerHTML = estTiles({ what: sel.length === 1 ? "Film with a pick" : "Films with a pick", n: sel.length, now, after, freed, added, real: true, ratingsBefore, ratingsAfter })
+    $("sg-est").innerHTML = estTiles({ what: sel.length === 1 ? "Title with a pick" : "Titles with a pick", n: sel.length, now, after, freed, added, real: true, ratingsBefore, ratingsAfter })
       + (n > sel.length ? `<div class="est-foot"><span class="muted small">${n - sel.length} selected with nothing to grab aren't counted.</span></div>` : "");
   }
 }

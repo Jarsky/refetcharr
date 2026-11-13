@@ -209,7 +209,7 @@ def test_suggestions_list_the_options_and_a_pick_grabs_that_one(monkeypatch):
     grabbed = []
     monkeypatch.setattr(eng.radarr, "grab", lambda rel, mid: grabbed.append(rel["title"]))
     e = eng.Engine()
-    assert "Finding replacements for 1" in e.suggest([7])
+    assert "Interactive search for 1" in e.suggest([7])
     e.tick = None  # not needed: run the job directly
     e.suggest_one(7)
     sg = e.suggestions()[0]

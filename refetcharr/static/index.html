@@ -32,7 +32,7 @@
         <span>Activity</span><span class="badge" id="b-activity" hidden></span></a>
       <div class="nav-sub">
         <a href="#replaced" data-tab="replaced">Replaced<span class="badge ok" id="b-replaced" hidden></span></a>
-        <a href="#failed" data-tab="failed">Not replaced<span class="badge" id="b-failed" hidden></span></a>
+        <a href="#failed" data-tab="failed">Skipped<span class="badge" id="b-failed" hidden></span></a>
         <a href="#events" data-tab="events">Events</a>
       </div>
     </div>
@@ -41,13 +41,14 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg>
         <span>Settings</span><span class="badge" id="b-settings" hidden></span></a>
       <div class="nav-sub">
-        <a href="#replacement" data-tab="replacement">Replacement</a>
-        <a href="#quality" data-tab="quality">Quality</a>
-        <a href="#queue" data-tab="queue">Queue &amp; schedule</a>
+        <a href="#replacement" data-tab="replacement">Rules</a>
+        <a href="#quality" data-tab="quality">Ratings</a>
+        <a href="#queue" data-tab="queue">Queue</a>
         <a href="#radarr" data-tab="radarr">Radarr<span class="badge" id="b-radarr" hidden></span></a>
         <a href="#sonarr" data-tab="sonarr">Sonarr<span class="badge" id="b-sonarr" hidden></span></a>
-        <a href="#timings" data-tab="timings">Timings</a>
+        <a href="#timings" data-tab="timings" data-adv>Timings</a>
         <a href="#security" data-tab="security">Security</a>
+        <label class="adv-toggle"><input type="checkbox" id="adv"> Show advanced</label>
       </div>
     </div>
   </nav>
@@ -65,7 +66,6 @@
   <div class="actions">
     <div class="qctl" id="ctl-films" data-ctl="films"></div>
     <div class="qctl" id="ctl-tv" data-ctl="tv" hidden></div>
-    <button id="scan" class="btn ghost">Rescan library</button>
   </div>
 </header>
 
@@ -78,20 +78,8 @@
       <div class="stat"><b id="s-replaced">–</b><span id="s-replaced-label">replaced</span></div>
       <div class="stat" id="stat-active"><b id="s-active">–</b><span id="s-active-label">downloading</span></div>
       <div class="stat"><b id="s-today">–</b><span id="s-today-label">grabbed today</span></div>
-      <div class="stat warn"><b id="s-failed">–</b><span id="s-failed-label">not replaced</span></div>
+      <div class="stat warn"><b id="s-failed">–</b><span id="s-failed-label">skipped</span></div>
     </section>
-    <div class="card queue-now">
-      <div>
-        <h2>Queue the biggest wins<button type="button" class="tip" data-tip="They start one after another straight away, whatever the downloads-at-once and daily limits and the schedule. Pause still holds them." aria-label="They start one after another straight away, whatever the downloads-at-once and daily limits and the schedule. Pause still holds them.">i</button></h2>
-      </div>
-      <form id="queue-form" class="inline">
-        <label for="queue-n" class="sr">How many</label>
-        <input id="queue-n" type="number" min="1" max="500" value="10">
-        <div class="seg kind" data-kind-for="queue" role="group" aria-label="Films or TV" hidden><button type="button" data-kind="films" aria-pressed="true">Films</button><button type="button" data-kind="tv" aria-pressed="false">TV</button></div>
-        <button class="btn primary">Queue</button>
-        <button type="button" id="queue-clear" class="btn ghost">Clear waiting</button>
-      </form>
-    </div>
     <h2 class="band-h" data-band hidden><span class="band-dot film"></span>Films</h2>
     <div class="grid2 even">
       <div class="card fill">
@@ -114,30 +102,42 @@
         <ul id="activity-tv" class="feed scroll"></ul>
       </div>
     </div>
-    <div class="card">
-      <h2>Library scan <span id="scan-at" class="muted small"></span></h2>
-      <div id="scan-summary" class="groups"></div>
-    </div>
   </section>
 
   <section id="tab-library" class="tab" hidden>
+    <div class="pagehead"><span id="lib-summary" class="summary"></span>
+      <button id="scan" type="button" class="btn ghost sm">Rescan library</button></div>
     <div class="card">
       <div class="toolbar">
         <input id="lib-q" type="search" placeholder="Find a title…" aria-label="Find a title">
-        <div id="lib-groups" class="chips" role="group" aria-label="Groups"></div>
-        <label class="check"><input id="lib-untried" type="checkbox" checked> Not tried yet</label>
-        <label class="check"><input id="lib-ignored" type="checkbox"> Show ignored</label>
-        <button id="lib-queue" class="btn primary" disabled>Replace selected</button>
-        <button id="lib-suggest" class="btn" disabled title="Search now and list every qualifying release to pick from">Find replacements</button>
-        <button id="lib-ignore" class="btn" disabled>Ignore selected</button>
-        <span id="lib-count" class="muted small"></span><button type="button" class="tip" data-tip="Click a film for its details: why it&#x27;s flagged, its picture and audio, and what a replacement must keep. Find replacements searches now and lists every release that qualifies, to pick from under Suggestions." aria-label="Click a film for its details: why it&#x27;s flagged, its picture and audio, and what a replacement must keep. Find replacements searches now and lists every release that qualifies, to pick from under Suggestions.">i</button>
-      </div>
-      <div class="filters">
-        <label>Rating <select id="lib-f-rating"><option value="">Any</option><option value="LOW">LOW · under 2.0</option><option value="MEDIUM">MEDIUM · 2.0 to 3.5</option><option value="HIGH">HIGH · 3.5 and up</option></select></label>
-        <label>Resolution <select id="lib-f-res"><option value="">Any</option><option value="2160">4K</option><option value="1080">1080p</option><option value="720">720p</option><option value="sd">SD</option></select></label>
-        <label>HDR <select id="lib-f-hdr"><option value="">Any</option><option value="1">HDR or DV</option><option value="0">SDR</option></select></label>
-        <label>Atmos <select id="lib-f-atmos"><option value="">Any</option><option value="1">Atmos</option><option value="0">No Atmos</option></select></label>
-        <label class="check" data-covers-only="lib" hidden><input id="lib-all-c" type="checkbox"> Select all shown</label>
+        <div class="menu-wrap"><button type="button" class="btn" data-menu="lib-filter" aria-expanded="false">Filter<span class="fcount" id="lib-filter-n"></span></button>
+          <div class="menu" id="lib-filter" hidden>
+            <h4>Groups</h4><div id="lib-groups" class="chips" role="group" aria-label="Groups"></div>
+            <div class="menu-row"><label class="check"><input id="lib-untried" type="checkbox" checked> Not tried yet</label>
+              <label class="check"><input id="lib-ignored" type="checkbox"> Show ignored</label></div>
+            <div class="menu-grid">
+              <label>Rating <select id="lib-f-rating"><option value="">Any</option><option value="LOW">LOW · under 2.0</option><option value="MEDIUM">MEDIUM · 2.0 to 3.5</option><option value="HIGH">HIGH · 3.5 and up</option></select></label>
+              <label>Resolution <select id="lib-f-res"><option value="">Any</option><option value="2160">4K</option><option value="1080">1080p</option><option value="720">720p</option><option value="sd">SD</option></select></label>
+              <label>HDR <select id="lib-f-hdr"><option value="">Any</option><option value="1">HDR or DV</option><option value="0">SDR</option></select></label>
+              <label>Atmos <select id="lib-f-atmos"><option value="">Any</option><option value="1">Atmos</option><option value="0">No Atmos</option></select></label>
+            </div>
+            <button type="button" class="btn ghost sm" id="lib-filter-reset">Reset filters</button>
+          </div></div>
+        <label class="sortby">Sort <select id="lib-sort"><option value="saving_gb:-1">Biggest saving</option><option value="size_gb:-1">Biggest</option><option value="rating_sort:1">Lowest rating</option><option value="rating_sort:-1">Highest rating</option><option value="mb_per_min:-1">Most MB per minute</option><option value="title:1">Title</option></select></label>
+        <span id="lib-count" class="muted small"></span><button type="button" class="tip" data-tip="Click a title for its details: why it&#x27;s flagged, its picture and audio, and what a replacement must keep. Tick titles to search for them: Search picks a release by itself, Interactive search lists every release that qualifies to pick from under Suggestions." aria-label="Click a title for its details: why it&#x27;s flagged, its picture and audio, and what a replacement must keep. Tick titles to search for them: Search picks a release by itself, Interactive search lists every release that qualifies to pick from under Suggestions.">i</button>
+        <span class="grow"></span>
+        <div class="menu-wrap"><button type="button" class="btn" data-menu="lib-queue-menu" aria-expanded="false">Queue next…</button>
+          <div class="menu right" id="lib-queue-menu" hidden>
+            <form id="queue-form" class="inline">
+              <label for="queue-n">Queue the next</label>
+              <input id="queue-n" type="number" min="1" max="500" value="10">
+              <span id="queue-unit">biggest wins</span>
+              <button class="btn primary sm">Queue</button>
+            </form>
+            <p class="muted small">They start one after another straight away, whatever the limits and the schedule. Pause still holds them.</p>
+            <button type="button" id="queue-clear" class="btn ghost sm">Clear what's waiting</button>
+          </div></div>
+        <label class="check" data-covers-only="lib" hidden><input id="lib-all-c" type="checkbox"> Select all</label>
         <div class="seg view" data-view-for="lib" role="group" aria-label="View"><button type="button" data-view="list" aria-pressed="true">List</button><button type="button" data-view="covers" aria-pressed="false">Covers</button></div>
       </div>
       <div id="lib-est" class="est" hidden aria-live="polite"></div>
@@ -145,17 +145,21 @@
         <table class="data">
           <thead><tr>
             <th class="pick"><input id="lib-all" type="checkbox" aria-label="Select all shown"></th>
-            <th data-sort="title" id="lib-th-title">Film</th><th data-sort="group">Group</th><th data-sort="quality">Quality</th>
-            <th data-sort="rating_sort" title="Out of 5: picture and audio for its resolution, weighted (Settings → Quality). LOW under 2.0, MEDIUM to 3.5, HIGH from 3.5">Rating</th>
-            <th data-sort="size_gb" class="r">Size</th><th data-sort="mb_per_min" class="r">MB/min</th>
-            <th data-sort="saving_gb" class="r">Saves about</th><th>Refetcharr</th>
+            <th data-sort="title" id="lib-th-title">Film</th><th data-sort="group">Group</th><th data-sort="resolution">Format</th>
+            <th data-sort="rating_sort" title="Out of 5: picture and audio for its resolution, weighted (Settings → Ratings). LOW under 2.0, MEDIUM to 3.5, HIGH from 3.5">Rating</th>
+            <th data-sort="size_gb" class="r">Size</th><th data-sort="saving_gb" class="r">Saving</th>
           </tr></thead>
-          <tbody id="lib-rows" data-cols="9"></tbody>
+          <tbody id="lib-rows" data-cols="7"></tbody>
         </table>
       </div>
       <div id="lib-grid" class="covers" hidden></div>
       <button id="lib-more" class="btn ghost more" hidden>Show more</button>
     </div>
+    <div class="selbar" id="lib-selbar" hidden><span id="lib-sel-n" class="sel-n"></span>
+      <button id="lib-queue" class="btn primary">Search</button>
+      <button id="lib-suggest" class="btn">Interactive search</button>
+      <button id="lib-ignore" class="btn">Ignore</button>
+      <button type="button" class="btn ghost" data-unselect="lib">Clear selection</button></div>
   </section>
 
   <section id="tab-replaced" class="tab" hidden>
@@ -166,54 +170,63 @@
           <button type="button" class="chip" data-show="all" aria-pressed="true">All <span id="done-n-all"></span></button>
           <button type="button" class="chip" data-show="issues" aria-pressed="false" style="--c: var(--red)">Needs attention <span id="done-n-issues"></span></button>
         </div>
-        <button type="button" class="tip" data-tip="Click a film to see what changed, from what to what, and why that release was picked. Needs attention: the picture rates LOW now, or HDR or surround sound was lost. Replace again looks for a better file, of any size up to the maximum." aria-label="Click a film to see what changed, from what to what, and why that release was picked. Needs attention: the picture rates LOW now, or HDR or surround sound was lost. Replace again looks for a better file, of any size up to the maximum.">i</button>
-        <button id="done-again" class="btn primary" disabled title="Search for a better file: any size up to the maximum, winning back what was lost">Replace again</button>
-        <button id="done-suggest" class="btn" disabled title="Search now and list the better releases to pick from">Find replacements</button>
+        <button type="button" class="tip" data-tip="Click a title to see what changed and why that release was picked. Needs attention: the picture rates LOW now, or HDR or surround sound was lost. Replace again looks for a better file, of any size up to the maximum." aria-label="Click a title to see what changed and why that release was picked. Needs attention: the picture rates LOW now, or HDR or surround sound was lost. Replace again looks for a better file, of any size up to the maximum.">i</button>
       </div>
       <div class="tablebox">
         <table class="data">
-          <thead><tr><th class="pick"><input id="done-all" type="checkbox" aria-label="Select all shown"></th><th>Title</th><th>When</th><th>Was</th><th title="Before → after (Settings → Quality)">Rating</th><th class="r">Before</th><th class="r">After</th><th class="r">Freed</th></tr></thead>
+          <thead><tr><th class="pick"><input id="done-all" type="checkbox" aria-label="Select all shown"></th><th>Title</th><th>When</th><th>Was</th><th title="Before → after (Settings → Ratings)">Rating</th><th class="r">Before</th><th class="r">After</th><th class="r">Freed</th></tr></thead>
           <tbody id="done-rows" data-cols="8"></tbody>
         </table>
       </div>
     </div>
+    <div class="selbar" id="done-selbar" hidden><span id="done-sel-n" class="sel-n"></span>
+      <button id="done-again" class="btn primary" title="Search for a better file: any size up to the maximum, winning back what was lost">Replace again</button>
+      <button id="done-suggest" class="btn">Interactive search</button>
+      <button type="button" class="btn ghost" data-unselect="done">Clear selection</button></div>
   </section>
 
   <section id="tab-suggestions" class="tab" hidden>
     <div class="card">
       <div class="toolbar">
-        <span class="toolbar-lead">Releases to pick from <button type="button" class="tip" data-tip="Films searched with Find replacements, and every release that qualified. Click a film to compare them, and click a release to pick it: the pick is remembered, so you can go through films one by one and grab them all at once. Unpicked films take the best pick." aria-label="Films searched with Find replacements, and every release that qualified. Click a film to compare them, and click a release to pick it: the pick is remembered, so you can go through films one by one and grab them all at once. Unpicked films take the best pick.">i</button></span><span id="sg-busy" class="msg info"></span>
-        <button id="sg-grab" class="btn primary" disabled title="Grab each selected film's pick (the best one unless you picked another)">Grab picks</button>
-        <button id="sg-again" class="btn" disabled>Search again</button>
-        <button id="sg-clear" class="btn ghost" disabled>Clear selected</button>
-      </div>
-      <div class="filters">
         <input id="sg-q" type="search" placeholder="Find a title…" aria-label="Find a title">
-        <label>Show <select id="sg-f-show"><option value="">All</option><option value="options">With releases</option><option value="none">Nothing qualified</option><option value="mine">Your picks</option><option value="shrink">Getting smaller</option><option value="grow">Getting bigger</option></select></label>
-        <label>Pick rated <select id="sg-f-rating"><option value="">Any</option><option value="HIGH">HIGH</option><option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option></select></label>
-        <label>Resolution <select id="sg-f-res"><option value="">Any</option><option value="2160">4K</option><option value="1080">1080p</option><option value="720">720p</option></select></label>
-        <label>Sort <select id="sg-sort"><option value="at">Recently searched</option><option value="saving">Biggest saving</option><option value="grow">Biggest growth</option><option value="now">Biggest now</option><option value="pick">Biggest pick</option><option value="rating">Best pick rating</option><option value="gain">Biggest rating gain</option><option value="title">Title</option></select></label>
-        <label class="check" data-covers-only="sg" hidden><input id="sg-all-c" type="checkbox"> Select all shown</label>
-        <span id="sg-count" class="muted small"></span>
+        <div class="menu-wrap"><button type="button" class="btn" data-menu="sg-filter" aria-expanded="false">Filter<span class="fcount" id="sg-filter-n"></span></button>
+          <div class="menu" id="sg-filter" hidden>
+            <div class="menu-grid">
+              <label>Show <select id="sg-f-show"><option value="">All</option><option value="options">With releases</option><option value="none">Nothing qualified</option><option value="mine">Your picks</option><option value="shrink">Getting smaller</option><option value="grow">Getting bigger</option></select></label>
+              <label>Pick rated <select id="sg-f-rating"><option value="">Any</option><option value="HIGH">HIGH</option><option value="MEDIUM">MEDIUM</option><option value="LOW">LOW</option></select></label>
+              <label>Resolution <select id="sg-f-res"><option value="">Any</option><option value="2160">4K</option><option value="1080">1080p</option><option value="720">720p</option></select></label>
+            </div>
+            <button type="button" class="btn ghost sm" id="sg-filter-reset">Reset filters</button>
+          </div></div>
+        <label class="sortby">Sort <select id="sg-sort"><option value="at">Recently searched</option><option value="saving">Biggest saving</option><option value="grow">Biggest growth</option><option value="now">Biggest now</option><option value="pick">Biggest pick</option><option value="rating">Best pick rating</option><option value="gain">Biggest rating gain</option><option value="title">Title</option></select></label>
+        <span id="sg-count" class="muted small"></span><button type="button" class="tip" data-tip="Titles searched with Interactive search, and every release that qualified. Click a title to compare them, and click a release to pick it: picks are remembered, so you can go through them one by one and grab them all at once. Titles you didn&#x27;t pick for take the best pick." aria-label="Titles searched with Interactive search, and every release that qualified. Click a title to compare them, and click a release to pick it: picks are remembered, so you can go through them one by one and grab them all at once. Titles you didn&#x27;t pick for take the best pick.">i</button>
+        <span id="sg-busy" class="msg info"></span>
+        <span class="grow"></span>
+        <label class="check" data-covers-only="sg" hidden><input id="sg-all-c" type="checkbox"> Select all</label>
         <div class="seg view" data-view-for="sg" role="group" aria-label="View"><button type="button" data-view="list" aria-pressed="true">List</button><button type="button" data-view="covers" aria-pressed="false">Covers</button></div>
       </div>
       <div id="sg-est" class="est" hidden aria-live="polite"></div>
       <div class="tablebox" id="sg-table">
         <table class="data">
-          <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Title</th><th>Now</th><th>Pick</th><th class="r">Saves</th><th class="r">Options</th><th>Searched</th></tr></thead>
+          <thead><tr><th class="pick"><input id="sg-all" type="checkbox" aria-label="Select all"></th><th>Title</th><th>Now</th><th>Pick</th><th class="r">Saving</th><th class="r">Options</th><th>Searched</th></tr></thead>
           <tbody id="sg-rows" data-cols="7"></tbody>
         </table>
       </div>
       <div id="sg-grid" class="covers" hidden></div>
     </div>
+    <div class="selbar" id="sg-selbar" hidden><span id="sg-sel-n" class="sel-n"></span>
+      <button id="sg-grab" class="btn primary" title="Grab each selected title's pick (the best one unless you picked another)">Grab picks</button>
+      <button id="sg-again" class="btn">Search again</button>
+      <button id="sg-clear" class="btn ghost">Remove</button>
+      <button type="button" class="btn ghost" data-unselect="sg">Clear selection</button></div>
   </section>
 
   <section id="tab-failed" class="tab" hidden>
     <div class="card">
       <div class="toolbar">
-        <span class="toolbar-lead">Kept their original <button type="button" class="tip" data-tip="Films and seasons that were tried but kept their original file. Click one to see every release that was turned down and why. Retry when new releases or seeders may have turned up." aria-label="Films and seasons that were tried but kept their original file. Click one to see every release that was turned down and why. Retry when new releases or seeders may have turned up.">i</button></span>
-        <button id="retry-sel" class="btn" disabled>Retry selected</button>
-        <button id="retry-all" class="btn primary">Retry all</button>
+        <span class="toolbar-lead">Kept their original file<button type="button" class="tip" data-tip="Tried, but no release qualified (or the download failed its checks), so the original stays. Click one to see every release that was turned down and why. Retry when new releases or seeders may have turned up." aria-label="Tried, but no release qualified (or the download failed its checks), so the original stays. Click one to see every release that was turned down and why. Retry when new releases or seeders may have turned up.">i</button></span>
+        <span class="grow"></span>
+        <button id="retry-all" class="btn">Retry all</button>
       </div>
       <div class="tablebox">
         <table class="data">
@@ -222,6 +235,9 @@
         </table>
       </div>
     </div>
+    <div class="selbar" id="fail-selbar" hidden><span id="fail-sel-n" class="sel-n"></span>
+      <button id="retry-sel" class="btn primary">Retry</button>
+      <button type="button" class="btn ghost" data-unselect="fail">Clear selection</button></div>
   </section>
 
   <section id="tab-events" class="tab" hidden>
@@ -258,7 +274,7 @@
         <div id="set-groups" class="switches"></div>
       </div>
       <div class="card">
-        <h2>Keep from the original<button type="button" class="tip" data-tip="What a replacement must not lose. Each is checked twice: on the release title before it&#x27;s grabbed, and on the downloaded file before it replaces anything (a file that fails stays in qBittorrent and the original stays)." aria-label="What a replacement must not lose. Each is checked twice: on the release title before it&#x27;s grabbed, and on the downloaded file before it replaces anything (a file that fails stays in qBittorrent and the original stays).">i</button></h2>
+        <h2>Must keep<button type="button" class="tip" data-tip="What a replacement must not lose. Each is checked twice: on the release title before it&#x27;s grabbed, and on the downloaded file before it replaces anything (a file that fails stays in qBittorrent and the original stays)." aria-label="What a replacement must not lose. Each is checked twice: on the release title before it&#x27;s grabbed, and on the downloaded file before it replaces anything (a file that fails stays in qBittorrent and the original stays).">i</button></h2>
         <div class="switches two">
           <label class="switch"><input type="checkbox" name="keep_hdr"><span>Keep HDR<button type="button" class="tip" data-tip="an HDR or Dolby Vision film&#x27;s replacement must say HDR or DV, and the file must really be HDR" aria-label="an HDR or Dolby Vision film&#x27;s replacement must say HDR or DV, and the file must really be HDR">i</button></span></label>
           <label class="switch"><input type="checkbox" name="keep_surround"><span>Keep surround sound<button type="button" class="tip" data-tip="a 5.1 or 7.1 film mustn&#x27;t become stereo" aria-label="a 5.1 or 7.1 film mustn&#x27;t become stereo">i</button></span></label>
@@ -268,8 +284,8 @@
           <label class="switch"><input type="checkbox" name="untagged_is_english"><span>Untagged audio counts as English<button type="button" class="tip" data-tip="many encodes leave the language blank (&quot;und&quot;); a file naming only other languages is still refused" aria-label="many encodes leave the language blank (&quot;und&quot;); a file naming only other languages is still refused">i</button></span></label>
         </div>
       </div>
-      <div class="card">
-        <h2>Leave alone<button type="button" class="tip" data-tip="Films and seasons whose current file is from one of these release groups are never replaced, and releases from the second list are never downloaded. Names are matched whole, in any case. These lists are the same for films and TV. What you ignore one by one (Flagged → Ignore selected) is listed at the bottom." aria-label="Films and seasons whose current file is from one of these release groups are never replaced, and releases from the second list are never downloaded. Names are matched whole, in any case. These lists are the same for films and TV. What you ignore one by one (Flagged → Ignore selected) is listed at the bottom.">i</button></h2>
+      <div class="card" data-adv>
+        <h2>Exclusions<button type="button" class="tip" data-tip="Films and seasons whose current file is from one of these release groups are never replaced, and releases from the second list are never downloaded. Names are matched whole, in any case. These lists are the same for films and TV. What you ignore one by one (Flagged → Ignore selected) is listed at the bottom." aria-label="Films and seasons whose current file is from one of these release groups are never replaced, and releases from the second list are never downloaded. Names are matched whole, in any case. These lists are the same for films and TV. What you ignore one by one (Flagged → Ignore selected) is listed at the bottom.">i</button></h2>
         <div class="grid2">
           <div><h3>Keep films from these groups</h3><div id="ig-file_groups" class="taglist"></div></div>
           <div><h3>Never download from these groups</h3><div id="ig-release_groups" class="taglist"></div></div>
@@ -285,11 +301,11 @@
           <label class="range"><span>Leave films alone under <output name="min_runtime_o"></output></span><input type="range" name="min_runtime" min="0" max="120" step="5"></label>
         </div>
       </div>
-      <div class="grid2">
+      <div class="grid2" data-adv>
         <div class="card"><h2>Preferred video codecs<button type="button" class="tip" data-tip="Top of the list is tried first. Drag to reorder." aria-label="Top of the list is tried first. Drag to reorder.">i</button></h2><div id="list-video"></div></div>
         <div class="card"><h2>Preferred audio codecs<button type="button" class="tip" data-tip="Top of the list is tried first. Drag to reorder." aria-label="Top of the list is tried first. Drag to reorder.">i</button></h2><div id="list-audio"></div></div>
       </div>
-      <div class="card">
+      <div class="card" data-adv>
         <h2>Release requirements</h2>
         <div class="sliders">
           <label class="range"><span>At least <output name="min_seeders_o"></output></span><input type="range" name="min_seeders" min="0" max="100"></label>
@@ -302,12 +318,6 @@
           <label class="switch"><input type="checkbox" name="allow_usenet"><span>Allow usenet releases<button type="button" class="tip" data-tip="Radarr needs a usenet client" aria-label="Radarr needs a usenet client">i</button></span></label>
         </div>
       </div>
-      <div class="card">
-        <h2>Stalled downloads<button type="button" class="tip" data-tip="A download with no progress for this long gets a warning and stops taking up a download slot, so another film can start. It stays in the list and still imports if it finishes." aria-label="A download with no progress for this long gets a warning and stops taking up a download slot, so another film can start. It stays in the list and still imports if it finishes.">i</button></h2>
-        <div class="sliders">
-          <label class="range"><span>Stalled after <output name="stall_warn_hours_o"></output></span><input type="range" name="stall_warn_hours" min="0" max="72"></label>
-        </div>
-      </div>
       <div class="savebar"><button class="btn primary">Save</button><button type="button" id="rules-reset" class="btn ghost">Back to defaults</button>
         <span id="rules-saved" class="muted small" role="status"></span></div>
     </form>
@@ -316,7 +326,7 @@
   <section id="tab-quality" class="tab" hidden>
     <form id="quality" class="stack">
       <div class="kindbar" hidden><div class="seg kind" data-kind-for="quality" role="group" aria-label="Films or TV" hidden><button type="button" data-kind="films" aria-pressed="true">Films</button><button type="button" data-kind="tv" aria-pressed="false">TV</button></div><button type="button" class="tip" id="quality-kind-note" data-tip="" aria-label="">i</button></div>
-      <div class="card">
+      <div class="card" data-adv>
         <h2>Ratings<button type="button" class="tip" data-tip="The thresholds that rate a file LOW, MEDIUM or HIGH. The picture is rated for its resolution, in x265 terms: the audio&#x27;s share is taken off the file size first, and other codecs are converted with the factors below (x264 needs about 1.5× the bitrate of x265 for the same picture). Ratings show in the lists and each film&#x27;s details, and the least a replacement may have is set below." aria-label="The thresholds that rate a file LOW, MEDIUM or HIGH. The picture is rated for its resolution, in x265 terms: the audio&#x27;s share is taken off the file size first, and other codecs are converted with the factors below (x264 needs about 1.5× the bitrate of x265 for the same picture). Ratings show in the lists and each film&#x27;s details, and the least a replacement may have is set below.">i</button></h2>
         <div class="seg" id="q-res" role="tablist" aria-label="Resolution"></div>
         <p class="muted small" id="q-res-note"></p>
@@ -335,7 +345,7 @@
           <label class="range"><span>A film's overall rating is <output name="video_weight_o"></output></span><input type="range" name="video_weight" min="0" max="100" step="5"></label>
         </div>
       </div>
-      <div class="card">
+      <div class="card" data-adv>
         <h2>Codec efficiency<button type="button" class="tip" data-tip="How much more bitrate each codec needs than x265 for the same picture. Lower is more efficient." aria-label="How much more bitrate each codec needs than x265 for the same picture. Lower is more efficient.">i</button></h2>
         <div class="fields" id="q-codecs"></div>
       </div>
@@ -352,7 +362,7 @@
         <label class="switch"><input type="checkbox" name="films_auto"><span>Auto-queue<button type="button" class="tip" data-tip="keep films downloads topped up by itself, within the limits below" aria-label="keep films downloads topped up by itself, within the limits below">i</button></span></label>
         <div class="fields">
           <label>Downloads at once<input type="number" name="films_max_active" min="1" max="100"></label>
-          <label><span class="lbl">Grabbed per day<button type="button" class="tip" data-tip="0 = no limit" aria-label="0 = no limit">i</button></span><input type="number" name="films_max_per_day" min="0" max="1000"></label>
+          <label><span class="lbl">Daily limit<button type="button" class="tip" data-tip="0 = no limit" aria-label="0 = no limit">i</button></span><input type="number" name="films_max_per_day" min="0" max="1000"></label>
         </div>
         <h3>Schedule</h3>
         <label class="switch"><input type="checkbox" name="films_w_enabled"><span>Only start searches during these days and hours<button type="button" class="tip" data-tip="auto-queue only: what you queue by hand starts straight away" aria-label="auto-queue only: what you queue by hand starts straight away">i</button></span></label>
@@ -367,7 +377,7 @@
         <label class="switch"><input type="checkbox" name="tv_auto"><span>Auto-queue<button type="button" class="tip" data-tip="keep TV downloads topped up by itself, within the limits below" aria-label="keep TV downloads topped up by itself, within the limits below">i</button></span></label>
         <div class="fields">
           <label>Downloads at once<input type="number" name="tv_max_active" min="1" max="100"></label>
-          <label><span class="lbl">Grabbed per day<button type="button" class="tip" data-tip="0 = no limit" aria-label="0 = no limit">i</button></span><input type="number" name="tv_max_per_day" min="0" max="1000"></label>
+          <label><span class="lbl">Daily limit<button type="button" class="tip" data-tip="0 = no limit" aria-label="0 = no limit">i</button></span><input type="number" name="tv_max_per_day" min="0" max="1000"></label>
         </div>
         <h3>Schedule</h3>
         <label class="switch"><input type="checkbox" name="tv_w_enabled"><span>Only start searches during these days and hours<button type="button" class="tip" data-tip="auto-queue only: what you queue by hand starts straight away" aria-label="auto-queue only: what you queue by hand starts straight away">i</button></span></label>
@@ -377,6 +387,12 @@
           <label><span class="lbl">Until<button type="button" class="tip" data-tip="can run past midnight" aria-label="can run past midnight">i</button></span><input type="time" name="tv_w_end"></label>
         </div>
       </div>
+      </div>
+      <div class="card">
+        <h2>Stalled downloads<button type="button" class="tip" data-tip="A download with no progress for this long gets a warning and stops taking up a slot, so another can start. It stays listed and still imports if it finishes. For films and TV alike." aria-label="A download with no progress for this long gets a warning and stops taking up a slot, so another can start. It stays listed and still imports if it finishes. For films and TV alike.">i</button></h2>
+        <div class="sliders">
+          <label class="range"><span>Stalled after <output name="stall_warn_hours_o"></output></span><input type="range" name="stall_warn_hours" min="0" max="72"></label>
+        </div>
       </div>
       <div class="card">
         <h2>Library scan</h2>

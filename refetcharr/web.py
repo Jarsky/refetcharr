@@ -346,7 +346,7 @@ def requeue(body: IdsIn):
 @app.post("/api/suggest")
 def suggest(body: IdsIn):
     if len(body.ids) > 200:
-        raise HTTPException(400, "Find replacements for up to 200 films at a time: each is a search on every indexer")
+        raise HTTPException(400, "Interactive search takes up to 200 titles at a time: each is a search on every indexer")
     return {"message": engine.suggest(body.ids)}
 
 
