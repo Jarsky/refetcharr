@@ -521,3 +521,8 @@ details.note summary { cursor: pointer; }
 .adv-toggle { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 12px; font-size: 12px; color: var(--muted); cursor: pointer; }
 body:not(.adv) [data-adv] { display: none !important; }
 @media (max-width: 640px) { .menu-grid { grid-template-columns: 1fr; } .menu { min-width: 0; width: calc(100vw - 32px); } .menu.right { right: auto; left: 0; } }
+
+/* Fetch anyway (1.12.0) */
+.dd-wide { grid-column: 1 / -1; }
+.opt.forced { border-style: dashed; }
+.opt.forced .opt-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.12.0 (2026-11-18)
+
+Nothing rated LOW replaces a file any more, and you can fetch a release that was turned down only for its size or
+rating limits.
+
+- **Nothing rated LOW replaces a file.** With a minimum picture of MEDIUM or HIGH, a release rated LOW overall (under
+  2.0 of 5, picture and audio weighted) is turned down, even when its picture alone passes. The downloaded file is
+  rated as well before it's imported (ffprobe: bitrates, codecs, length, size): if its picture is under your minimum or
+  it's rated LOW overall, the original stays. A release title often doesn't name its audio, so only the file shows it.
+  Honeymoon in Vegas went from a FLAC remux (5.0) to an x264 encode with 192 kbps AC3 2.0 (1.9).
+- **Fetch anyway** (Suggestions, a film's details): up to 8 releases turned down only for what you may overrule (the
+  maximum size, the minimum picture or rating, Radarr's size limits and custom format scores), highest rated first
+  (in steps of 0.5), then nearest the target size (your Preferred MB/min for this film). Each says why it was turned
+  down and how far it is from the target. Never offered: BR-DISK, blocked groups, too few seeders, no English, Dolby
+  Vision without HDR10, the same release, losing HDR, surround, Atmos or lossless, or (putting a film right) no better
+  than now. A release fetched anyway isn't refused at import for the minimums it was chosen past.
+- Deeper ffprobe (since 1.11.0): TrueHD Atmos from web sources was reported as no Atmos.
+
 ## 1.11.0 (2026-11-13)
 
 A calmer interface, closer to Sonarr's and Radarr's: each list has one toolbar, actions show up when you select

@@ -34,6 +34,9 @@ HDR = re.compile(r"\bhdr(10)?(\+|plus)?\b", re.I)
 ENGLISH = ("eng", "en", "english")
 # Radarr's objections that a smaller file of the same quality always gets: the whole point is to accept these
 IGNORABLE = re.compile(r"upgrade|cutoff|existing file|not an improvement", re.I)
+# Radarr rejections a person may overrule with Fetch anyway: its size limits and custom format scores. Nothing else.
+SOFT_RADARR = re.compile(r"custom formats?\b.*\bscore|larger than maximum allowed|smaller than minimum allowed", re.I)
+BR_DISK = re.compile(r"\bBR-?DISK\b|\bBDMV\b|\bCOMPLETE[ ._-]+(?:UHD[ ._-]+)?BLU-?RAY\b|\.iso\b|\bISO\b")
 
 # What a release title can say about its codecs (id: label, pattern). Titles come in every spelling: "H 265", "x265", "HEVC",
 # "DD 5 1", "DDP5.1", "E-AC-3". Anything else a person adds to their list is matched as a word in the title.
@@ -197,7 +200,9 @@ def judge(m: dict, rel: dict, r: dict, never: list | None = None, q: dict | None
     if rel.get("protocol") != "torrent" and not r["allow_usenet"]:
         why.append("usenet (not allowed in Replacement settings)")
     hard = [x if isinstance(x, str) else x.get("reason", "") for x in rel.get("rejections", [])]
-    hard = [x for x in hard if not IGNORABLE.search(x)]
+    hard = [x for x in hard if not IGNORABLE.search(x) and not (r.get("_relaxed") and SOFT_RADARR.search(x))]
+    if r.get("_relaxed") and (BR_DISK.search(rel.get("title") or "") or any("BR-DISK" in x for x in hard + why)):
+        why.append("a full disc (BR-DISK), not a video file")
     if hard:
         why.append(hard[0][:80])
     if res < cur_res and not r["allow_lower_res"]:
@@ -274,7 +279,21 @@ def keeps(before: dict, after: dict, r: dict, upgrade: bool = False, need: dict 
     if after.get("video_tier") and not quality.at_least(after["video_tier"], floor):
         why.append(f"picture {after['video_tier']} for {quality.res_label(after['resolution'])} "
                    f"(about {after['picture_mbps']:g} Mbps in x265 terms; your minimum is {floor.upper()})")
+    elif low_overall(after, floor):
+        why.append(f"{rating_line(after)}; with a minimum of {floor.upper()} nothing rated LOW replaces a file")
     return why
+
+
+def low_overall(d: dict, floor: str) -> bool:
+    """Rated LOW overall (under 2.0 of 5, picture and audio weighted) while the minimum is MEDIUM or HIGH. The minimum
+    is about the picture, but a fair picture with poor audio is still a worse film: Honeymoon in Vegas (2026-11-15) went
+    from a FLAC remux to an x264 encode with 192 kbps AC3 2.0, rated 1.9."""
+    return floor not in ("off", "low", "") and d.get("badge") == "LOW"
+
+
+def rating_line(d: dict) -> str:
+    return (f"rated LOW overall ({d['rating']:.1f} of 5: picture {d.get('video_rating') or 0:.1f}, "
+            f"audio {d.get('audio_rating') or 0:.1f})")
 
 
 def explain(m: dict, chosen: dict, ok: list, total: int, r: dict, q: dict | None = None) -> list[str]:
@@ -366,11 +385,35 @@ def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | 
     return (ok[0] if ok else None), notes
 
 
+INF = float("inf")
+
+
+def relaxed(r: dict) -> dict:
+    """The rules for Fetch anyway: no size limits, no minimum picture or overall rating, Radarr's size limits and format
+    scores overruled. Everything else still holds: seeders, blocked groups, English, DV without HDR10, the same release,
+    HDR, surround, Atmos and lossless to keep, a lower resolution, and (when putting a film right) better than now."""
+    return {**r, "_relaxed": True, "cap_1080": INF, "cap_2160": INF, "max_ratio": INF, "min_picture": "off",
+            "reject_negative_score": False}
+
+
+def target_size(m: dict, res: int, r: dict) -> float:
+    """The size a release is measured against for Fetch anyway: your Preferred MB/min for its resolution, for this film."""
+    return preferred(max(res, 1080), r) * (minutes(m) or 1) * 1e6
+
+
+def forced_rank(d: dict, target: float) -> tuple:
+    """Fetch anyway's order: the highest rating first (in steps of 0.5, so 5.0 before 4.5), then the nearest to the
+    target size, then the most seeders."""
+    band = int((d.get("rating") or 0) * 2) / 2
+    return (-band, abs(d["size"] - target) / (target or 1), -(d.get("seeders") or 0))
+
+
 def probe(path: str, ffprobe: str = "ffprobe") -> dict:
     # Probe deep: TrueHD from web sources often only shows "Dolby TrueHD + Dolby Atmos" (and its channel layout)
     # past ffprobe's default 5 MB / 5 s, so a shallow probe called a real Atmos track "no Atmos" (Bugonia, 2026-11-18).
     out = subprocess.run([ffprobe, "-v", "error", "-probesize", "200M", "-analyzeduration", "60M", "-show_entries",
-                          "stream=codec_type,codec_name,profile,channels,color_transfer:stream_tags=language,title"
+                          "stream=codec_type,codec_name,profile,channels,color_transfer,width,bit_rate"
+                          ":stream_disposition=attached_pic:stream_tags=language,title,BPS,BPS-eng:format=size,duration"
                           ":stream_side_data=dv_profile,dv_bl_signal_compatibility_id",
                           "-of", "json", path], capture_output=True, text=True, timeout=180)
     return json.loads(out.stdout or "{}")
@@ -384,13 +427,17 @@ HDR_TRANSFERS = ("smpte2084", "arib-std-b67")  # PQ (HDR10, DV's base) and HLG
 
 
 def file_problem(path: str, need_english: bool, ffprobe: str = "ffprobe", check_dv: bool = True, untagged_ok: bool = True,
-                 need: dict | None = None) -> str | None:
+                 need: dict | None = None, rating: dict | None = None) -> str | None:
     """Why a downloaded file can't replace the old one (None when it's fine): English audio must survive, and Dolby
     Vision needs an HDR10 base, because the TVs can't play DV-only (profile 5 or an incompatible base layer).
     Many encodes don't tag their audio language ("und"): with `untagged_ok`, a file whose tracks are all untagged
     passes (the release was only chosen because it listed English), but one that names only other languages doesn't.
-    A track whose title says English counts too: some releases tag it wrong ("chi" on "English DTS-HD Master Audio")."""
-    streams = probe(path, ffprobe).get("streams") or []
+    A track whose title says English counts too: some releases tag it wrong ("chi" on "English DTS-HD Master Audio").
+    With `rating` ({"min_picture", "q", "runtime_min"}) the file itself is rated as well: its picture must reach the
+    minimum and, with a minimum of MEDIUM or HIGH, it mustn't be rated LOW overall. A release title often doesn't name
+    its audio, so only the file shows how poor it is."""
+    data = probe(path, ffprobe)
+    streams = data.get("streams") or []
     if not streams:
         return "couldn't read the file"
     tracks = [x.get("tags") or {} for x in streams if x.get("codec_type") == "audio"]
@@ -403,7 +450,19 @@ def file_problem(path: str, need_english: bool, ffprobe: str = "ffprobe", check_
         dv = next((sd for sd in v.get("side_data_list") or [] if "dv_profile" in sd), None)
         if dv and (dv.get("dv_profile") == 5 or dv.get("dv_bl_signal_compatibility_id") == 0 or v.get("color_transfer") != "smpte2084"):
             return f"Dolby Vision without an HDR10 base (profile {dv.get('dv_profile')})"
-    return keeps_problem(streams, need or {})
+    kept = keeps_problem(streams, need or {})
+    if kept or rating is None:
+        return kept
+    d = quality.describe_probed(data, rating.get("runtime_min") or 0, rating.get("q"))
+    floor = rating.get("min_picture", "medium")
+    if not d:
+        return None
+    if d["video_tier"] and not quality.at_least(d["video_tier"], floor):
+        return (f"picture {d['video_tier']} for {quality.res_label(d['resolution'])} in the file (about "
+                f"{d['picture_mbps']:g} Mbps in x265 terms; your minimum is {floor.upper()})")
+    if low_overall(d, floor):
+        return f"the file is {rating_line(d)}; with a minimum of {floor.upper()} nothing rated LOW replaces a file"
+    return None
 
 
 def needs(before: dict, r: dict) -> dict:

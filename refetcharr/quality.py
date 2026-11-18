@@ -220,6 +220,40 @@ def describe_file(f: dict, runtime_min: float, q: dict | None = None) -> dict:
     return out
 
 
+def describe_probed(data: dict, runtime_min: float = 0, q: dict | None = None) -> dict | None:
+    """A downloaded file, rated from ffprobe's streams and format (rules.probe) the way describe_file rates a file
+    Radarr reports, so a download can be judged before it replaces anything. None when its size, length or video is
+    unknown."""
+    streams = data.get("streams") or []
+    fmt = data.get("format") or {}
+    size = int(float(fmt.get("size") or 0))
+    mins = float(fmt.get("duration") or 0) / 60 or runtime_min
+    video = next((x for x in streams if x.get("codec_type") == "video"
+                  and (x.get("disposition") or {}).get("attached_pic") != 1), None)
+    if not size or not mins or not video:
+        return None
+
+    def bps(x: dict) -> float:  # MKV keeps bitrates in BPS tags (mkvmerge statistics), MP4 in bit_rate
+        tag = next((v for k, v in (x.get("tags") or {}).items() if k.upper().startswith("BPS")), 0)
+        try:
+            return float(x.get("bit_rate") or tag or 0)
+        except ValueError:
+            return 0.0
+
+    width = int(video.get("width") or 0)
+    res = 2160 if width >= 3200 else 1080 if width >= 1800 else 720 if width >= 1200 else 480 if width else 0
+    audio = [{"codec": f"{(a.get('codec_name') or '').replace('_', ' ')} {a.get('profile') or ''}".strip(),
+              "channels": a.get("channels") or 0, "bitrate": bps(a),
+              "language": (a.get("tags") or {}).get("language") or ""}
+             for a in streams if a.get("codec_type") == "audio"]
+    hdr = video.get("color_transfer") in ("smpte2084", "arib-std-b67")
+    f = {"size": size, "quality": {"quality": {"resolution": res, "name": ""}},
+         "mediaInfo": {"videoCodec": (video.get("codec_name") or "").replace("video", ""),  # mpeg2video -> mpeg2
+                       "videoBitrate": bps(video), "audioStreams": audio or [{"codec": "", "channels": 0, "bitrate": 0}],
+                       "videoDynamicRange": "HDR" if hdr else ""}}
+    return describe_file(f, mins, q)
+
+
 def describe_release(rel: dict, runtime_min: float, q: dict | None = None) -> dict:
     """What a release would be, from its title and size (estimates: nothing is known for sure until it's downloaded)."""
     q = settings(q)

@@ -414,3 +414,70 @@ def test_suggestions_searched_before_ratings_are_rated_from_what_they_kept(monke
     for was, now in zip([fresh["before"], *fresh["options"]], [again["before"], *again["options"]], strict=True):
         assert {k: now[k] for k in rating_keys} == {k: was[k] for k in rating_keys}
     assert again["options"][1]["audio_rating"] is None  # audio the title doesn't name stays unrated
+
+
+def test_nothing_rated_low_overall_replaces_a_file():
+    # Honeymoon in Vegas, 2026-11-15: an x264 encode with a MEDIUM picture but 192 kbps AC3 2.0, 1.9 overall
+    after = {"video_tier": "MEDIUM", "badge": "LOW", "rating": 1.9, "video_rating": 2.1, "audio_rating": 1.5,
+             "picture_mbps": 3.83, "resolution": 1080}
+    assert any("rated LOW overall (1.9 of 5" in w for w in rules.keeps({}, after, {"min_picture": "medium"}))
+    assert not any("LOW overall" in w for w in rules.keeps({}, after, {"min_picture": "low"}))
+    assert not any("LOW overall" in w for w in rules.keeps({}, {**after, "badge": "MEDIUM", "rating": 2.4}, {"min_picture": "medium"}))
+
+
+class ProbeData:
+    def __init__(self, data):
+        self.data = data
+
+    def __call__(self, path, ffprobe="ffprobe"):
+        return self.data
+
+
+HONEYMOON = {"streams": [{"codec_type": "video", "codec_name": "h264", "width": 1920, "color_transfer": "bt709"},
+                         {"codec_type": "audio", "codec_name": "ac3", "channels": 2, "bit_rate": "192000",
+                          "tags": {"language": "eng"}}],
+             "format": {"size": "4266969179", "duration": "5748.0"}}
+
+
+def test_the_downloaded_file_is_rated_before_it_replaces_anything(monkeypatch):
+    monkeypatch.setattr(rules, "probe", ProbeData(HONEYMOON))
+    d = quality.describe_probed(HONEYMOON)
+    assert d["resolution"] == 1080 and d["audio_key"] == "ac3" and d["badge"] == "LOW"
+    why = rules.file_problem("x.mkv", True, rating={"min_picture": "medium"})
+    assert why and "LOW overall" in why
+    assert "picture MEDIUM" in rules.file_problem("x.mkv", True, rating={"min_picture": "high"})
+    assert rules.file_problem("x.mkv", True, rating={"min_picture": "low"}) is None
+    assert rules.file_problem("x.mkv", True) is None  # without a rating only the keep checks run
+    # the same picture with a DTS-HD MA track (lossless, rated 5.0) is fine
+    video = {**HONEYMOON["streams"][0], "tags": {"BPS": "6000000"}}  # a real video bitrate: 4 Mbps in x265 terms
+    lossless = {**HONEYMOON, "streams": [video, {"codec_type": "audio", "codec_name": "dts",
+                                                                     "profile": "DTS-HD MA", "channels": 2}]}
+    monkeypatch.setattr(rules, "probe", ProbeData(lossless))
+    assert quality.describe_probed(lossless)["audio_key"] == "dtshd"
+    assert rules.file_problem("x.mkv", True, rating={"min_picture": "medium"}) is None
+    # nothing known about the size or length: not rated, not refused
+    monkeypatch.setattr(rules, "probe", ProbeData({"streams": HONEYMOON["streams"]}))
+    assert rules.file_problem("x.mkv", True, rating={"min_picture": "medium"}) is None
+
+
+def test_fetch_anyway_relaxes_only_the_soft_limits():
+    m = film(quality_name="Remux-1080p", res=1080, hdr="", codec="AVC", audio="FLAC", ch=2.0)
+    big = release("Film 1080p BluRay REMUX AVC FLAC 2 0-EPSiLON", gb=60, res=1080)
+    big["rejections"] = ["Custom Formats Remux have score -9900 below Movie's profile minimum 0"]
+    big["customFormatScore"] = -9900
+    assert rules.judge(m, big, R)  # turned down normally
+    assert rules.judge(m, big, rules.relaxed(R)) == []  # but may be fetched anyway
+    disc = release("Film 1992 DUAL COMPLETE BLURAY-RedHands", gb=24, res=1080)
+    assert any("BR-DISK" in w for w in rules.judge(m, disc, rules.relaxed(R)))
+    starved = {**release("Film 1080p BluRay x264-X", gb=8, res=1080), "seeders": 0}
+    assert any("seeders" in w for w in rules.judge(m, starved, rules.relaxed(R)))
+
+
+def test_fetch_anyway_ranks_by_rating_then_nearness_to_the_target():
+    target = 6e9
+    a = {"rating": 5.0, "size": 22e9, "seeders": 1}
+    b = {"rating": 4.0, "size": 6.2e9, "seeders": 9}
+    c = {"rating": 5.0, "size": 20e9, "seeders": 1}
+    d = {"rating": 4.2, "size": 6.0e9, "seeders": 1}
+    order = sorted([a, b, c, d], key=lambda x: rules.forced_rank(x, target))
+    assert order == [c, a, d, b]  # 5.0s first, the nearer of them first; then the 4.0-4.5 band, nearest first

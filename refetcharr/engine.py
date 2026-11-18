@@ -571,6 +571,8 @@ class Engine:
         why = rules.explain(m, rel, ranked, len(releases), r, q)
         if by_hand:
             why = ["picked by hand from the suggestions"] + why[1:]
+        if decision.get("forced"):
+            why = [f"fetched anyway, past: {decision['forced']}"] + why[1:]
         decision.update(after=quality.describe_release(rel, rules.minutes(m), q), why=why,
                         runners_up=[{"title": x["title"], "size": x["size"], "seeders": x.get("seeders")} for x in ranked if x is not rel][:5])
         arr.grab(rel, m["id"])
@@ -636,7 +638,7 @@ class Engine:
             problem = None
             for v in vids:  # every file of a season pack is checked: one bad episode keeps the whole season as it was
                 problem = rules.file_problem(v["path"], e.get("english", True) and r["keep_english"], config.FFPROBE, r["reject_dv_no_hdr10"],
-                                             r["untagged_is_english"], e.get("needs"))
+                                             r["untagged_is_english"], e.get("needs"), self._rating(s, mid, e))
                 if problem:
                     problem = f"{os.path.basename(v['path'])}: {problem}" if len(vids) > 1 else problem
                     break
@@ -710,6 +712,16 @@ class Engine:
         if m and m.get("movieFile"):
             return quality.describe_file(m["movieFile"], rules.minutes(m), q)["badge"]
         return ""
+
+    @staticmethod
+    def _rating(s: dict, mid, e: dict) -> dict | None:
+        """What file_problem rates a download against: the item's minimum picture and quality settings. None for a
+        release fetched anyway: it was chosen past those minimums."""
+        if (e.get("decision") or {}).get("forced"):
+            return None
+        c = config.for_item(s, mid)
+        return {"min_picture": c["rules"].get("min_picture", "medium"), "q": c.get("quality"),
+                "runtime_min": ((e.get("decision") or {}).get("before") or {}).get("runtime_min") or 0}
 
     @staticmethod
     def _describe(f: dict, e: dict, mid=0) -> dict:
@@ -940,6 +952,7 @@ class Engine:
                 break
             d = quality.describe_release(rel, mins, q)
             options.append({**d, "guid": rel["guid"], "indexerId": rel.get("indexerId"), "saving": m["movieFile"]["size"] - rel["size"]})
+        forced = self._forced(m, releases, ranked, r, s, q, mode, base["needs"])
         sugg = self._load_json("suggestions.json", {})
         was = sugg.get(str(mid)) or {}  # your pick survives a new search when the same release is offered again
         old = next((o for o in was.get("options", []) if o["guid"] == was.get("chosen")), None)
@@ -949,9 +962,31 @@ class Engine:
                           "chosen": again["guid"] if again else (options[0]["guid"] if options else None),
                           "mode": mode, "flagged": self._flagged(m, s, mode, need), "before": before, "options": options,
                           "why": rules.explain(m, ranked[0], ranked, len(releases), r, q) if ranked else [],
-                          "rejected": notes[:40], "releases": len(releases)}
+                          "rejected": notes[:40], "releases": len(releases), "forced": forced}
         self._save_json("suggestions.json", sugg)
         store.log("suggest", f"{m['title']} ({m.get('year')}): {len(options)} replacement(s) to pick from, of {len(releases)} releases", id=mid)
+
+    FORCED_MAX = 8
+
+    def _forced(self, m: dict, releases: list, ranked: list, r: dict, s: dict, q: dict | None, mode: str, need: dict) -> list:
+        """Fetch anyway: releases turned down only for what a person may overrule (size, picture or rating minimums,
+        Radarr's size limits and format scores), ranked by rating, then nearness to the target size (rules.forced_rank)."""
+        taken = {x["guid"] for x in ranked}
+        loose, mins, cur_file = rules.relaxed(r), rules.minutes(m), rules.current(m, q)
+        out, seen = [], set()
+        for rel in releases:
+            key = re.sub(r"[^a-z0-9]", "", rel["title"].lower())
+            if rel["guid"] in taken or key in seen:
+                continue
+            if rules.judge(m, rel, loose, s["ignore"]["release_groups"], q, cur_file, mode, need):
+                continue
+            seen.add(key)
+            d = quality.describe_release(rel, mins, q)
+            target = rules.target_size(m, d["resolution"], r)
+            out.append({**d, "guid": rel["guid"], "indexerId": rel.get("indexerId"), "saving": m["movieFile"]["size"] - rel["size"],
+                        "target": round(target), "turned_down": rules.judge(m, rel, r, s["ignore"]["release_groups"], q, cur_file, mode, need)})
+        out.sort(key=lambda d: rules.forced_rank(d, d["target"]))
+        return out[:self.FORCED_MAX]
 
     def suggestions(self) -> list:
         s = config.load()
@@ -959,7 +994,7 @@ class Engine:
         for sg in self._load_json("suggestions.json", {}).values():  # searched before 1.8: rated from the bitrates kept
             q = config.for_item(s, sg["id"]).get("quality")
             out.append({"kind": ids.kind(sg["id"]), **sg, "before": quality.rated(sg.get("before"), q),
-                        "options": [quality.rated(o, q) for o in sg.get("options", [])]})
+                        "options": [quality.rated(o, q) for o in sg.get("options", [])], "forced": sg.get("forced") or []})
         return sorted(out, key=lambda x: x["at"], reverse=True)
 
     def dismiss(self, ids: list) -> str:
@@ -971,7 +1006,7 @@ class Engine:
 
     def pick(self, mid: int, guid: str) -> str:
         sugg = self._load_json("suggestions.json", {}).get(str(mid))
-        if not sugg or not any(o["guid"] == guid for o in sugg["options"]):
+        if not sugg or not any(o["guid"] == guid for o in sugg["options"] + (sugg.get("forced") or [])):
             raise ValueError("That release isn't among the film's suggestions any more: find replacements again")
         if (store.load().get(str(mid)) or {}).get("status") in store.PENDING:
             raise ValueError("The film is already downloading a replacement")
@@ -1026,8 +1061,9 @@ class Engine:
         self.busy = f"Grabbing the picked release for {m['title']}"
         releases = arr.releases(mid)
         rel = next((x for x in releases if x["guid"] == guid), None)
+        forced = next((o for o in (sg or {}).get("forced") or [] if o["guid"] == guid), None)
         if rel is None:
-            title = next((o["title"] for o in (sg or {}).get("options", []) if o["guid"] == guid), "")
+            title = next((o["title"] for o in (sg or {}).get("options", []) + ((sg or {}).get("forced") or []) if o["guid"] == guid), "")
             rel = next((x for x in releases if title and x["title"] == title), None)
         if rel is None:
             store.log("fail", f"{m['title']}: the picked release is no longer listed by the indexers; find replacements again", id=mid)
@@ -1041,6 +1077,8 @@ class Engine:
         decision = {"flagged": (sg or {}).get("flagged") or self._flagged(m, s, mode, need), "before": before,
                     "rejected": (sg or {}).get("rejected", []), "releases": (sg or {}).get("releases", len(releases)),
                     "searched": (sg or {}).get("at") or time.strftime("%Y-%m-%d %H:%M")}
+        if forced:  # fetched anyway: the download isn't refused for the minimums it was chosen past
+            decision["forced"] = "; ".join(forced.get("turned_down") or []) or "fetched anyway"
         try:
             self._grab(m, s, rel, ranked, releases, base, decision, by_hand=True, replace=bool(e))
         except radarr.RadarrError as err:

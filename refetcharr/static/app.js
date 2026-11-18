@@ -1208,6 +1208,19 @@ function optionCard(sg, o, i) {
     <div class="opt-side">${miniCard(o)}<span class="opt-save">${saveText(o.saving)}</span></div>
   </div>`;
 }
+function forcedCard(sg, o) {  // Fetch anyway: turned down only for what you may overrule
+  const off = o.target ? Math.round((o.size / o.target - 1) * 100) : null;
+  const near = off == null ? "" : `<span class="fact">${off === 0 ? "on" : off > 0 ? `${off}% over` : `${-off}% under`} the ${size(o.target)} target</span>`;
+  return `<div class="opt forced">
+    <div class="opt-main">
+      <div class="opt-title"><span class="name">${esc(o.title)}</span></div>
+      <div class="facts">${facts(o)}${near}</div>
+      <div class="muted small">Turned down: ${esc((o.turned_down || []).join("; ") || "?")}</div>
+    </div>
+    <div class="opt-side">${miniCard(o)}<span class="opt-save">${saveText(o.saving)}</span>
+      <button type="button" class="btn sm" data-pick="${sg.id}" data-guid="${esc(o.guid)}" data-force="${esc(o.title)}">Fetch anyway · ${size(o.size)}</button></div>
+  </div>`;
+}
 function choosePick(id, guid) {
   const sg = sugg.find((s) => s.id === id);
   if (!sg || pickOf(sg)?.guid === guid) return;
@@ -1227,6 +1240,8 @@ function suggDetail(sg) {
       : `<p class="problem">Nothing qualified of ${sg.releases} releases.</p>`}
     <div class="dd-cols">
       ${sg.why?.length ? `<div><h4>Why the best pick</h4><ul>${sg.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
+      ${sg.forced?.length ? `<div class="dd-wide"><details ${sg.options.length ? "" : "open"}><summary class="muted small">Fetch anyway: ${sg.forced.length} turned down only for size, picture or rating limits (highest rated first, then nearest the target size)</summary>
+        <div class="opts">${sg.forced.map((o) => forcedCard(sg, o)).join("")}</div></details></div>` : ""}
       ${rej.length ? `<div><details><summary class="muted small">${rej.length} turned down, and why</summary><ul class="rej">${rej.map((n) => { const m = /^(.*?): (.*)$/.exec(n); return `<li>${m ? `<b>${esc(m[1])}</b>: ${esc(m[2])}` : esc(n)}</li>`; }).join("")}</ul></details></div>` : ""}
     </div></div>`;
 }
@@ -1330,6 +1345,7 @@ $("sg-rows").addEventListener("click", (e) => {
   const c = e.target.closest("[data-choose]");
   if (c && !e.target.closest("a, button")) { choosePick(+c.dataset.choose, c.dataset.guid); return; }
   const p = e.target.closest("[data-pick]");
+  if (p && p.dataset.force && !confirm(`Fetch ${p.dataset.force} anyway? It replaces the file on disk even though it's outside your limits.`)) return;
   if (p) { p.disabled = true; act(async () => { const r = await api("POST", "/api/pick", { id: +p.dataset.pick, guid: p.dataset.guid }); setTimeout(() => loadSuggestions(), 4000); return r; }); return; }
   if (e.target.closest("input, a, button, label, .dd")) return;
   const tr = e.target.closest("tr.row-x"); if (!tr) return;
