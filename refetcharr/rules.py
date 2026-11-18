@@ -367,7 +367,9 @@ def best(m: dict, releases: list, r: dict, never: list | None = None, q: dict | 
 
 
 def probe(path: str, ffprobe: str = "ffprobe") -> dict:
-    out = subprocess.run([ffprobe, "-v", "error", "-show_entries",
+    # Probe deep: TrueHD from web sources often only shows "Dolby TrueHD + Dolby Atmos" (and its channel layout)
+    # past ffprobe's default 5 MB / 5 s, so a shallow probe called a real Atmos track "no Atmos" (Bugonia, 2026-11-18).
+    out = subprocess.run([ffprobe, "-v", "error", "-probesize", "200M", "-analyzeduration", "60M", "-show_entries",
                           "stream=codec_type,codec_name,profile,channels,color_transfer:stream_tags=language,title"
                           ":stream_side_data=dv_profile,dv_bl_signal_compatibility_id",
                           "-of", "json", path], capture_output=True, text=True, timeout=180)
